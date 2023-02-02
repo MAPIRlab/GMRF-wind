@@ -1,6 +1,16 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(gmrf_wind_mapping)
 
+option ( DEBUG "" OFF)
+set(DEBUG OFF)
+
+if(DEBUG)
+  add_definitions(-DDEBUG)
+  set(CMAKE_CXX_FLAGS "-g ${CMAKE_CXX_FLAGS}")
+else()
+  set(CMAKE_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
+endif(DEBUG)
+
 find_package(catkin REQUIRED COMPONENTS 
   roscpp
   cv_bridge
@@ -40,7 +50,7 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
     DEPENDS eigen opencv2 libpcl-all-dev
-    CATKIN_DEPENDS cv_bridge roscpp pcl_ros
+    CATKIN_DEPENDS cv_bridge roscpp pcl_ros message_runtime
     LIBRARIES ${PROJECT_NAME}
 )
 

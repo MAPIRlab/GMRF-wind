@@ -46,7 +46,7 @@ public:
     //Visualization
     void get_as_markerArray(visualization_msgs::MarkerArray &ma, std::string frame_id);
 
-    Eigen::Vector2d getEstimation(double x, double y);
+    Eigen::Vector3d getEstimation(double x, double y);
 protected:
     std::vector<TRandomFieldCell>           m_map;                                  // GMRF container of nodes
     nav_msgs::OccupancyGrid                 m_Ocgridmap;                            // Occupancy gridmap of the environment

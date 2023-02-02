@@ -689,6 +689,9 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     {
         // Fill new Observation
         // The wind vector provided is already the DownWind direction in the /map reference system
+        if(x_pos<=m_x_min || x_pos>=m_x_max || y_pos<=m_y_min || y_pos>=m_y_max)
+            return;
+
         const int cellIdx = xy2idx( x_pos, y_pos );
         TobservationGMRF new_obs;
         new_obs.cell_idx = cellIdx;
@@ -879,12 +882,13 @@ void  CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
 }
 
 
-Eigen::Vector2d CGMRF_map::getEstimation(double x, double y){
+Eigen::Vector3d CGMRF_map::getEstimation(double x, double y){
     int i = xy2idx(x,y);
     double module = sqrt(pow(m_map[i].mean,2) + pow(m_map[i+N].mean,2));
     double direction = atan2(m_map[i+N].mean, m_map[i].mean);
+    double stdev = std::max(0.1, sqrt(pow(m_map[i].std,2) + pow(m_map[i+N].std,2)));
 
-    return Eigen::Vector2d(module, direction);
+    return Eigen::Vector3d(module, direction, stdev);
 }
 
 void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::string frame_id)

@@ -76,6 +76,9 @@ Cgmrf::~Cgmrf(){}
 //--------------------------
 void Cgmrf::mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
 {
+    if(module_init)
+        return;
+
     ROS_DEBUG("[GMRF-node] %s - Map of the environment!", __FUNCTION__);
     occupancyMap = *msg;
 
@@ -189,9 +192,10 @@ bool Cgmrf::get_wind_value_srv(gmrf_wind_mapping::WindEstimation::Request  &req,
 {
     //Since the wind fields are identical among different instances, return just the information from instance[0]
     for(int i=0;i<req.x.size();i++){
-        Eigen::Vector2d r = my_map->getEstimation(req.x[i], req.y[i]);
+        Eigen::Vector3d r = my_map->getEstimation(req.x[i], req.y[i]);
         res.u.push_back(r.x());
         res.v.push_back(r.y());
+        res.stdevAngle.push_back(r.z());
     }
     return true;
 }
@@ -223,8 +227,8 @@ int main(int argc, char **argv)
 			ROS_INFO("[gmrf] Updating every %f seconds. Intended preiod was %f", (ros::Time::now()-last_publication_time).toSec(), 1.0/my_gmrf_map.exec_freq);
 			last_publication_time = ros::Time::now();
 		}
-        	else
-        	{
+        else
+        {
 			ROS_INFO("[gmrf] Waiting for initialization (Map of environment).");
 		}
         	loop_rate.sleep();
