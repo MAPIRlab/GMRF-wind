@@ -67,7 +67,7 @@ include_directories(
 
 ## Declare a C++ executable
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
-add_dependencies(gmrf_wind_mapping_node ${olfaction_msgs_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(gmrf_wind_mapping_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 link_directories(${catkin_LIBRARY_DIRS})
