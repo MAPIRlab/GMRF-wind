@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(gmrf_wind_mapping)
+set(CMAKE_BUILD_TYPE "None") 
 
-option ( DEBUG "" OFF)
+
+
 set(DEBUG OFF)
 
 if(DEBUG)
@@ -10,6 +12,13 @@ if(DEBUG)
 else()
   set(CMAKE_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
 endif(DEBUG)
+
+
+
+
+
+
+
 
 find_package(catkin REQUIRED COMPONENTS 
   roscpp

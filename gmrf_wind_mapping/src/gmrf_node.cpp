@@ -53,7 +53,7 @@ Cgmrf::Cgmrf()
     // Subscriptions
     //----------------------------------
     sub_sensor = param_n.subscribe(sensor_topic, 1, &Cgmrf::sensorCallback, this);
-    ocupancyMap_sub = param_n.subscribe("map", 1, &Cgmrf::mapCallback, this);
+    ocupancyMap_sub = param_n.subscribe("/map", 1, &Cgmrf::mapCallback, this);
     //----------------------------------
     // Publishers
     //----------------------------------
