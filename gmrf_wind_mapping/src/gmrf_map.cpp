@@ -688,7 +688,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     try
     {
         // Fill new Observation
-        // The wind vector provided is already the DownWind direction in the /map reference system
+        // The wind vector provided is already the DownWind direction in the map reference system
         if(x_pos<=m_x_min || x_pos>=m_x_max || y_pos<=m_y_min || y_pos>=m_y_max)
             return;
 

@@ -28,7 +28,7 @@ Cgmrf::Cgmrf()
     // Load Parameters
     //------------------
     ros::NodeHandle param_n("~");
-    param_n.param<std::string>("frame_id", frame_id, "/map");
+    param_n.param<std::string>("frame_id", frame_id, "map");
     param_n.param<std::string>("sensor_topic", sensor_topic, "/anemometer");
     param_n.param<double>("exec_freq", exec_freq, 2.0);
     param_n.param<double>("cell_size", cell_size, 0.5);
@@ -53,7 +53,7 @@ Cgmrf::Cgmrf()
     // Subscriptions
     //----------------------------------
     sub_sensor = param_n.subscribe(sensor_topic, 1, &Cgmrf::sensorCallback, this);
-    ocupancyMap_sub = param_n.subscribe("/map", 1, &Cgmrf::mapCallback, this);
+    ocupancyMap_sub = param_n.subscribe("map", 1, &Cgmrf::mapCallback, this);
     //----------------------------------
     // Publishers
     //----------------------------------
@@ -144,10 +144,10 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
         ROS_ERROR("[GMRF] Exception at new Obs: %s ", e.what() );
     }
     mutex_anemometer.unlock();
-    //ROS_INFO("[GMRF-node] New wind observation! %.2f m/s  %.2f rad (DownWind in the /map ref system)",msg->wind_speed, downwind_direction_map);
+    //ROS_INFO("[GMRF-node] New wind observation! %.2f m/s  %.2f rad (DownWind in the map ref system)",msg->wind_speed, downwind_direction_map);
 
 
-    //2. Get pose of the sensor in the /map reference system
+    //2. Get pose of the sensor in the map reference system
     tf::StampedTransform transform;
     bool know_sensor_pose = true;
     try
@@ -166,7 +166,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
     //3. Add observation to the GMRF map
     if (module_init)
     {
-        //Current sensor pose in the /map
+        //Current sensor pose in the map
         float x_pos = transform.getOrigin().x();
         float y_pos = transform.getOrigin().y();
 

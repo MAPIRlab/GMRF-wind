@@ -72,7 +72,7 @@ public:
 
     //Node Params
     std::string                             sensor_topic;
-    std::string                             frame_id;           //frame where to plot the map, usually (/map)
+    std::string                             frame_id;           //frame where to plot the map, usually (map)
     double                                  cell_size;
     double                                  exec_freq;
     std::string                             colormap;
