@@ -36,39 +36,39 @@
 //-----------------------------------------------------
 // 2D Wind estimation with GMRF
 //-----------------------------------------------------
-#include "ros/ros.h"
-#include "std_msgs/Float32.h"
-#include "nav_msgs/Odometry.h"
-#include "nav_msgs/OccupancyGrid.h"
-#include <sensor_msgs/PointCloud2.h>
-#include "geometry_msgs/PoseWithCovarianceStamped.h"
-#include <visualization_msgs/MarkerArray.h>
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/math/constants/constants.hpp>
-#include <tf/transform_listener.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
 #include <angles/angles.h>
-#include "olfaction_msgs/anemometer.h"
+#include "olfaction_msgs/msg/anemometer.hpp"
 
 #include "gmrf_map.h"
 
 
 //Services
-#include "olfaction_msgs/suggestNextObservationLocation.h"
-#include "gmrf_wind_mapping/WindEstimation.h"
+#include "gmrf_wind_mapping/srv/wind_estimation.hpp"
 
+using WindEstimation=gmrf_wind_mapping::srv::WindEstimation;
 
-
-class Cgmrf
+class Cgmrf : public rclcpp::Node
 {
 public:
     Cgmrf();
     ~Cgmrf();
     void publishMaps();
-    bool get_wind_value_srv(gmrf_wind_mapping::WindEstimation::Request  &req, gmrf_wind_mapping::WindEstimation::Response &res);
+    bool get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res);
 
     //GMRF variables    
     CGMRF_map                               *my_map;			// The Online Gas Distribution Map being generated
-    nav_msgs::OccupancyGrid                 occupancyMap;       //Occupancy GridMap of the environment
+    nav_msgs::msg::OccupancyGrid                 occupancyMap;       //Occupancy GridMap of the environment
 
     //Node Params
     std::string                             sensor_topic;
@@ -103,16 +103,15 @@ public:
 
 
 protected:
-    ros::NodeHandle                         n;
-    tf::TransformListener                   tf_listener; //Do not put inside the callback    
 
     //Subscriptions & Publishers
-    ros::Subscriber sub_sensor, ocupancyMap_sub;
-    ros::Publisher wind_array_pub;
+    rclcpp::Subscription<olfaction_msgs::msg::Anemometer>::SharedPtr sub_sensor; 
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr ocupancyMap_sub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
 
     //Callbacks
-    void sensorCallback(const olfaction_msgs::anemometerConstPtr msg);
-    void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg);
+    void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
+    void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
 };
 
 

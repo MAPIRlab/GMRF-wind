@@ -1,18 +1,10 @@
 
-#include "ros/ros.h"
-#include <nav_msgs/OccupancyGrid.h>
-#include <sensor_msgs/PointCloud2.h>
-#include <Eigen/Sparse>
+#include "rclcpp/rclcpp.hpp"
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <eigen3/Eigen/Sparse>
 #include <fstream>                              // std::ofstream
-#include <pcl/conversions.h>
-#include <pcl_conversions/pcl_conversions.h>
-#include <pcl/point_cloud.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
-#include <cv_bridge/cv_bridge.h>
-#include "visualization_msgs/Marker.h"
-#include "visualization_msgs/MarkerArray.h"
-#include "tf/transform_datatypes.h"
+#include "visualization_msgs/msg/marker.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 #include <math.h>                               /* atan2 */
 
 
@@ -29,7 +21,7 @@ struct TRandomFieldCell
 class CGMRF_map
 {
 public:
-    CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
+    CGMRF_map(rclcpp::Node* _node, const nav_msgs::msg::OccupancyGrid &oc_map,
                          float cell_size,
                          double m_lambdaPrior_reg,
                          double m_lambdaPrior_mass_conservation,
@@ -44,12 +36,13 @@ public:
     void  updateMapEstimation_GMRF(float lambdaObsLoss);
 
     //Visualization
-    void get_as_markerArray(visualization_msgs::MarkerArray &ma, std::string frame_id);
+    void get_as_markerArray(visualization_msgs::msg::MarkerArray &ma, std::string frame_id);
 
     Eigen::Vector3d getEstimation(double x, double y);
 protected:
+    rclcpp::Node* node;
     std::vector<TRandomFieldCell>           m_map;                                  // GMRF container of nodes
-    nav_msgs::OccupancyGrid                 m_Ocgridmap;                            // Occupancy gridmap of the environment
+    nav_msgs::msg::OccupancyGrid                 m_Ocgridmap;                            // Occupancy gridmap of the environment
     float                                   m_x_min,m_x_max,m_y_min,m_y_max;        // dimensions (m)
     float                                   m_resolution;                           // cell_size (m)
     size_t                                  m_size_x, m_size_y;                     // dimensions in CellNumber
@@ -90,7 +83,7 @@ protected:
     //Visualization    
     void save_grmf_factor_graph(std::vector<Eigen::Triplet<double> > &Jout, std::vector<Eigen::Triplet<double> > &Aout, Eigen::VectorXd &yout);
     void save_grmf_factor_graph(Eigen::SparseMatrix<double> &H, Eigen::VectorXd &G);
-    visualization_msgs::Marker line_list, line_list_obs;
+    visualization_msgs::msg::Marker line_list, line_list_obs;
     void init_colormaps(std::string colormap);
     float color_r[200];
     float color_g[200];

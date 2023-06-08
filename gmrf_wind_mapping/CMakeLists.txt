@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.10)
 project(gmrf_wind_mapping)
 set(CMAKE_BUILD_TYPE "None") 
 
@@ -8,79 +8,61 @@ set(DEBUG OFF)
 
 if(DEBUG)
   add_definitions(-DDEBUG)
-  set(CMAKE_CXX_FLAGS "-g ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-g -O0 ${CMAKE_CXX_FLAGS}")
 else()
   set(CMAKE_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
 endif(DEBUG)
 
 
-
-
-
-
-
-
-find_package(catkin REQUIRED COMPONENTS 
-  roscpp
-  cv_bridge
-  pcl_ros
-  tf
-  std_msgs
-  nav_msgs  
-  sensor_msgs 
-  visualization_msgs
-  olfaction_msgs  
-  geometry_msgs
-  message_generation
-  )
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED) 
+find_package(angles REQUIRED) 
+find_package(Eigen3 REQUIRED) 
+find_package(tf2_geometry_msgs REQUIRED) 
+find_package(tf2_ros REQUIRED) 
+find_package(std_msgs REQUIRED) 
+find_package(nav_msgs REQUIRED) 
+find_package(sensor_msgs REQUIRED) 
+find_package(visualization_msgs REQUIRED) 
+find_package(olfaction_msgs REQUIRED) 
+find_package(geometry_msgs REQUIRED) 
+find_package(rosidl_default_generators REQUIRED) 
 
 ## System dependencies are found with CMake's conventions
-find_package(OpenCV REQUIRED)
 
-add_service_files(
-  FILES
-  WindEstimation.srv
-)
 
-generate_messages(
-  DEPENDENCIES
-  nav_msgs
-  std_msgs
+rosidl_generate_interfaces(${PROJECT_NAME}
+    srv/WindEstimation.srv
+    DEPENDENCIES std_msgs
 )
+ament_export_dependencies(rosidl_default_runtime)
 
-###################################
-## catkin specific configuration ##
-###################################
-## The catkin_package macro generates cmake config files for your package
-## Declare things to be passed to dependent projects
-## INCLUDE_DIRS: uncomment this if you package contains header files
-## LIBRARIES: libraries you create in this project that dependent projects also need
-## CATKIN_DEPENDS: catkin_packages dependent projects also need
-## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-    DEPENDS eigen opencv2 libpcl-all-dev
-    CATKIN_DEPENDS cv_bridge roscpp pcl_ros message_runtime
-    LIBRARIES ${PROJECT_NAME}
-)
 
 
 FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
 
-## Specify additional locations of header files
-## Your package locations should be listed before other locations
-# include_directories(include)
 include_directories(
   include
-  ${catkin_INCLUDE_DIRS}
 )
 
-## Declare a C++ executable
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
-add_dependencies(gmrf_wind_mapping_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-## Specify libraries to link a library or executable target against
-link_directories(${catkin_LIBRARY_DIRS})
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(gmrf_wind_mapping_node "${cpp_typesupport_target}") 
 
-target_link_libraries(gmrf_wind_mapping_node
-   ${catkin_LIBRARIES}
- )
+
+ament_target_dependencies(gmrf_wind_mapping_node
+    rclcpp
+    angles
+    Eigen3
+    tf2_ros
+    tf2_geometry_msgs
+    std_msgs
+    nav_msgs
+    sensor_msgs
+    visualization_msgs
+    olfaction_msgs
+    geometry_msgs
+)
+
+ament_package()

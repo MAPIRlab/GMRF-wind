@@ -1,18 +1,19 @@
 #include "gmrf_map.h"
-
+#include "Utils.h"
 
 
 
 /*---------------------------------------------------------------
                         Constructor
   ---------------------------------------------------------------*/
-CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
+CGMRF_map::CGMRF_map(rclcpp::Node* _node, const nav_msgs::msg::OccupancyGrid &oc_map,
                      float cell_size,
                      double m_lambdaPrior_reg,
                      double m_lambdaPrior_mass_conservation,
                      double m_lambdaPrior_obstacles,
                      std::string m_colormap, int max_points_cell)
 {
+    node = _node;
     try
     {
         // Copy params to internal variables
@@ -42,10 +43,10 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
 
 
         //For visualization only - pot lines between connected nodes
-        line_list.header.stamp = ros::Time();
+        line_list.header.stamp = node->now();
         line_list.ns = "factors_reg";
-        line_list.type = visualization_msgs::Marker::LINE_LIST;
-        line_list.action = visualization_msgs::Marker::ADD;
+        line_list.type = visualization_msgs::msg::Marker::LINE_LIST;
+        line_list.action = visualization_msgs::msg::Marker::ADD;
         line_list.id = 0;
         line_list.points.clear();
         //color = blue
@@ -56,10 +57,10 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         line_list.color.a = 1.0;
 
         //For visualization only - plot lines at nodes with Wx==0 or Wy==0 (factors due to obstacles)
-        line_list_obs.header.stamp = ros::Time();
+        line_list_obs.header.stamp = node->now();
         line_list_obs.ns = "factors_obs";
-        line_list_obs.type = visualization_msgs::Marker::LINE_LIST;
-        line_list_obs.action = visualization_msgs::Marker::ADD;
+        line_list_obs.type = visualization_msgs::msg::Marker::LINE_LIST;
+        line_list_obs.action = visualization_msgs::msg::Marker::ADD;
         line_list_obs.id = 1;
         line_list_obs.points.clear();
         //color = blue
@@ -70,7 +71,7 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         line_list_obs.color.a = 1.0;
 
         //points to add
-        geometry_msgs::Point p;
+        geometry_msgs::msg::Point p;
         p.x = 0;
         p.y = 0;
         p.z = 0;
@@ -79,7 +80,7 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         //-------------------------------------------------------
         // INIT RANDOM FIELD AND CREATE CONNEXIONS BETWEEN NODES
         //-------------------------------------------------------
-        ROS_INFO("[CGMRF] Generating GMRF for WIND estimation' ");
+        RCLCPP_INFO(node->get_logger(), "[CGMRF] Generating GMRF for WIND estimation' ");
 
         //1. Init the map container
         //-------------------------
@@ -88,14 +89,14 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         init_cell.std = 0.0;
         m_map.assign(2*N, init_cell);   //Since we have Wx and Wy, we refer to them as: Wx in the range [0,N-1], Wy in the range [N,2N-1]
 
-        ROS_INFO("--------------------------------");
-        ROS_INFO("[CGMRF] GMRF created:");
-        ROS_INFO("Occupancy size: x=(%.2f,%.2f)[m] y=(%.2f,%.2f)[m]", x_min, x_max, y_min, y_max);
-        ROS_INFO("Occupancy size: (%u,%u) cells with cell_size %.2fm", oc_map.info.width, oc_map.info.height, oc_map.info.resolution);
-        ROS_INFO("GMRF size:      x=(%.2f,%.2f)[m] y=(%.2f,%.2f)[m]", m_x_min, m_x_max, m_y_min, m_y_max);
-        ROS_INFO("GMRF size:      (%lu,%lu) cells with cell_size %.2fm", m_size_x, m_size_y, m_resolution);
-        ROS_INFO("GMRF size:      N = %lu cells, 2N = %lu nodes", N, m_map.size());
-        ROS_INFO("--------------------------------");
+        RCLCPP_INFO(node->get_logger(), "--------------------------------");
+        RCLCPP_INFO(node->get_logger(), "[CGMRF] GMRF created:");
+        RCLCPP_INFO(node->get_logger(), "Occupancy size: x=(%.2f,%.2f)[m] y=(%.2f,%.2f)[m]", x_min, x_max, y_min, y_max);
+        RCLCPP_INFO(node->get_logger(), "Occupancy size: (%u,%u) cells with cell_size %.2fm", oc_map.info.width, oc_map.info.height, oc_map.info.resolution);
+        RCLCPP_INFO(node->get_logger(), "GMRF size:      x=(%.2f,%.2f)[m] y=(%.2f,%.2f)[m]", m_x_min, m_x_max, m_y_min, m_y_max);
+        RCLCPP_INFO(node->get_logger(), "GMRF size:      (%lu,%lu) cells with cell_size %.2fm", m_size_x, m_size_y, m_resolution);
+        RCLCPP_INFO(node->get_logger(), "GMRF size:      N = %lu cells, 2N = %lu nodes", N, m_map.size());
+        RCLCPP_INFO(node->get_logger(), "--------------------------------");
 
 
         //2. Set NumFactors
@@ -179,7 +180,7 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
 
         //2.3 TOTAL Number of Factors
         nFactors = nPriorFactors + nObsFactors;
-        ROS_INFO("[CGMRF] Setting up Prior-factors");
+        RCLCPP_INFO(node->get_logger(), "[CGMRF] Setting up Prior-factors");
 
 
 
@@ -509,7 +510,7 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         nPriorFactors = count;
         nFactors = nPriorFactors + nObsFactors;
         activeObs.clear();
-        ROS_INFO("[CGMRF] Initialization complete: %lu factors for a map size of 2N=%lu nodes", nFactors, m_map.size());
+        RCLCPP_INFO(node->get_logger(), "[CGMRF] Initialization complete: %lu factors for a map size of 2N=%lu nodes", nFactors, m_map.size());
 
         //Set the colormap to display the wind vectors
         init_colormaps("jet");
@@ -534,14 +535,14 @@ CGMRF_map::CGMRF_map(const nav_msgs::OccupancyGrid &oc_map,
         new_obs.windY = 1.0;
         new_obs.lambda = 13;
         new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-        ROS_INFO("[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
+        RCLCPP_INFO(node->get_logger(), "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
         activeObs.push_back(new_obs);
         nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
         */
 
 
     }catch(std::exception e){
-        ROS_ERROR("[GMRF-Constructor] Exception: %s ", e.what() );
+        RCLCPP_ERROR(node->get_logger(), "[GMRF-Constructor] Exception: %s ", e.what() );
     }
 }
 
@@ -602,17 +603,17 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
         //Check occupancy
         if (m_Ocgridmap.data[id_oc]>=50.0)
         {
-            //ROS_INFO("[GMRF] OCCUPIED %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
+            //RCLCPP_INFO(node->get_logger(), "[GMRF] OCCUPIED %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return false;
         }
         else
         {
-            //ROS_INFO("[GMRF] FREE %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
+            //RCLCPP_INFO(node->get_logger(), "[GMRF] FREE %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return true;
         }
     }
     catch(std::exception e){
-        ROS_ERROR("[GMRF] Exception while checking cell freedom: %s ", e.what() );
+        RCLCPP_ERROR(node->get_logger(), "[GMRF] Exception while checking cell freedom: %s ", e.what() );
     }
 }
 
@@ -673,7 +674,7 @@ bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2
         return connected;
     }
     catch(std::exception e){
-        ROS_ERROR("[GMRF] Exception while checking cells interconnections: %s ", e.what() );
+        RCLCPP_ERROR(node->get_logger(), "[GMRF] Exception while checking cells interconnections: %s ", e.what() );
     }
 }
 
@@ -699,7 +700,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         new_obs.windY = wind_speed * sin(wind_direction);
         new_obs.lambda = lambdaObs;
         new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-        ROS_INFO("[GMRF] New obs: Wx = %.2f m/s Wy = %.2f m/s", new_obs.windX,new_obs.windY);
+        RCLCPP_INFO(node->get_logger(), "[GMRF] New obs: Wx = %.2f m/s Wy = %.2f m/s", new_obs.windX,new_obs.windY);
 
         // Add Observation to GMRF
         activeObs.push_back(new_obs);
@@ -726,7 +727,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         }
 
     }catch(std::exception e){
-        ROS_ERROR("[GMRF] Exception while Inserting new Observation: %s ", e.what() );
+        RCLCPP_ERROR(node->get_logger(), "[GMRF] Exception while Inserting new Observation: %s ", e.what() );
     }
 }
 
@@ -808,22 +809,22 @@ void  CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         //3. Build Matrices (J, J', A, H, G)
         Eigen::SparseMatrix<double> Jsparse(nFactors,2*N);				// declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end() );
-        ROS_INFO("          [GMRF] Jsparse is (%u,%u)",Jsparse.rows(),Jsparse.cols());
+        RCLCPP_INFO(node->get_logger(), "          [GMRF] Jsparse is (%u,%u)",Jsparse.rows(),Jsparse.cols());
 
         Eigen::SparseMatrix<double> JsparseT;//(2*N,nFactors);				// declares a column-major sparse matrix type of float
         JsparseT = Eigen::SparseMatrix<double>(Jsparse.transpose());
-        ROS_INFO("          [GMRF] JsparseT is (%u,%u)",JsparseT.rows(),JsparseT.cols());
+        RCLCPP_INFO(node->get_logger(), "          [GMRF] JsparseT is (%u,%u)",JsparseT.rows(),JsparseT.cols());
 
         Eigen::SparseMatrix<double> Asparse(nFactors,nFactors);			// declares a column-major sparse matrix type of float
         Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end() );
-        ROS_INFO("          [GMRF] Asparse is (%u,%u)",Asparse.rows(),Asparse.cols());
+        RCLCPP_INFO(node->get_logger(), "          [GMRF] Asparse is (%u,%u)",Asparse.rows(),Asparse.cols());
 
         Eigen::SparseMatrix<double> Hsparse;//(2*N,2*N);   				// declares a column-major sparse matrix type of float
         Hsparse = JsparseT * Asparse * Jsparse;
-        ROS_INFO("          [GMRF] Hsparse is (%u,%u)",Hsparse.rows(),Hsparse.cols());
+        RCLCPP_INFO(node->get_logger(), "          [GMRF] Hsparse is (%u,%u)",Hsparse.rows(),Hsparse.cols());
 
         Eigen::VectorXd G = JsparseT * Asparse * y_temp;
-        ROS_INFO("          [GMRF] G is (%lu,%lu)",G.rows(),G.cols());
+        RCLCPP_INFO(node->get_logger(), "          [GMRF] G is (%lu,%lu)",G.rows(),G.cols());
 
 
         // DEBUG - Save to file
@@ -840,7 +841,7 @@ void  CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         solver.compute(Hsparse);
         Eigen::VectorXd m_inc = solver.solve(G);
 
-        ROS_INFO("[GMRF] system solved with solution size (%lu,%lu)", m_inc.rows(), m_inc.cols());
+        RCLCPP_INFO(node->get_logger(), "[GMRF] system solved with solution size (%lu,%lu)", m_inc.rows(), m_inc.cols());
         std::ofstream file("/home/jgmonroy/gmrf_solution.txt");
         if (file.is_open())
         {
@@ -875,9 +876,9 @@ void  CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
             }else
                 ++ito;
         }
-        ROS_INFO("[GMRF] %lu ObservationFactors are active", nObsFactors);
+        RCLCPP_INFO(node->get_logger(), "[GMRF] %lu ObservationFactors are active", nObsFactors);
     }catch(std::exception e){
-        ROS_ERROR("[GMRF] Exception Updating the maps: %s ", e.what() );
+        RCLCPP_ERROR(node->get_logger(), "[GMRF] Exception Updating the maps: %s ", e.what() );
     }
 }
 
@@ -891,7 +892,7 @@ Eigen::Vector3d CGMRF_map::getEstimation(double x, double y){
     return Eigen::Vector3d(module, direction, stdev);
 }
 
-void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::string frame_id)
+void CGMRF_map::get_as_markerArray(visualization_msgs::msg::MarkerArray &ma, std::string frame_id)
 {
     ma.markers.clear();
     //options (debug)
@@ -903,13 +904,13 @@ void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::str
     if( plot_cell_centers)
     {
         //marker-points at all cells
-        visualization_msgs::Marker marker_free;
-        visualization_msgs::Marker marker_occ;
+        visualization_msgs::msg::Marker marker_free;
+        visualization_msgs::msg::Marker marker_occ;
         marker_free.header.frame_id = marker_occ.header.frame_id = frame_id.c_str();
-        marker_free.header.stamp = marker_occ.header.stamp = ros::Time();
+        marker_free.header.stamp = marker_occ.header.stamp = node->now();
         marker_free.ns = marker_occ.ns = "cell_centers";
-        marker_free.type = marker_occ.type = visualization_msgs::Marker::POINTS;
-        marker_free.action = marker_occ.action = visualization_msgs::Marker::ADD;
+        marker_free.type = marker_occ.type = visualization_msgs::msg::Marker::POINTS;
+        marker_free.action = marker_occ.action = visualization_msgs::msg::Marker::ADD;
         marker_free.id = 2;
         marker_occ.id = 3;
         // POINTS markers use x and y scale for width/height respectively
@@ -933,7 +934,7 @@ void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::str
         for (size_t i=0; i<N; i++)
         {
             double cell_center_x, cell_center_y;
-            geometry_msgs::Point p;
+            geometry_msgs::msg::Point p;
             id2xy(i, cell_center_x, cell_center_y);
             p.x = cell_center_x;
             p.y = cell_center_y;
@@ -962,12 +963,12 @@ void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::str
     if (plot_wind_vectors)
     {
         //Add an ARROW marker for each node
-        visualization_msgs::Marker marker;
+        visualization_msgs::msg::Marker marker;
         marker.header.frame_id = frame_id.c_str();
-        marker.header.stamp = ros::Time();
+        marker.header.stamp = node->now();
         marker.ns = "WindVector";
-        marker.type = visualization_msgs::Marker::ARROW;
-        marker.action = visualization_msgs::Marker::ADD;
+        marker.type = visualization_msgs::msg::Marker::ARROW;
+        marker.action = visualization_msgs::msg::Marker::ADD;
 
         //Get max wind vector in the map (to normalize the plot)
         double max_module = 0.0;
@@ -982,7 +983,7 @@ void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::str
             //if (is_cell_free(i))
             {
                 double module = sqrt(pow(m_map[i].mean,2) + pow(m_map[i+N].mean,2));
-                //ROS_INFO("[GMRF] wind(%lu)=(%.2f,%.2f)m/s",i,m_map[i].mean,m_map[i+N].mean );
+                //RCLCPP_INFO(node->get_logger(), "[GMRF] wind(%lu)=(%.2f,%.2f)m/s",i,m_map[i].mean,m_map[i+N].mean );
                 if ( module> 0.001)
                 {
                     // Set the pose of the marker.
@@ -991,7 +992,7 @@ void CGMRF_map::get_as_markerArray(visualization_msgs::MarkerArray &ma, std::str
                     id2xy(i, cell_center_x, cell_center_y);
                     marker.pose.position.x = cell_center_x;
                     marker.pose.position.y = cell_center_y;
-                    marker.pose.orientation = tf::createQuaternionMsgFromYaw( atan2(m_map[i+N].mean, m_map[i].mean) );
+                    marker.pose.orientation = Utils::createQuaternionMsgFromYaw( atan2(m_map[i+N].mean, m_map[i].mean) );
                     //shape
                     marker.scale.x = m_resolution *  (module/max_module);      // arrow length,
                     marker.scale.y = 0.03;           // arrow width
@@ -1025,7 +1026,7 @@ void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double> > &Jou
 
         // define the format you want, you only need one instance of this...
         const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
-        //ROS_INFO("[GMRF] Saving Factor-Graph to file...");
+        //RCLCPP_INFO(node->get_logger(), "[GMRF] Saving Factor-Graph to file...");
         std::ofstream file("/home/jgmonroy/gmrf_jacobian_dense.txt");
         if (file.is_open())
         {
@@ -1048,8 +1049,8 @@ void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double> > &Jou
 
     if(save_sparse)
     {
-        ROS_INFO("[GMRF] Saving Factor-Graph (list of triplets) to file...");
-        ROS_INFO("[GMRF] Jtriplets(%lu,3), Atriplets(%lu,3), numFactors(%lu)",Jout.size(),Aout.size(),yout.rows());
+        RCLCPP_INFO(node->get_logger(), "[GMRF] Saving Factor-Graph (list of triplets) to file...");
+        RCLCPP_INFO(node->get_logger(), "[GMRF] Jtriplets(%lu,3), Atriplets(%lu,3), numFactors(%lu)",Jout.size(),Aout.size(),yout.rows());
 
         //1. Jacobian
         std::ofstream file("/home/jgmonroy/gmrf_Jacobian.txt");

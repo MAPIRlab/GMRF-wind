@@ -14,11 +14,13 @@
 //========================================================================================
 
 #include "gmrf_node.h"
+#include <geometry_msgs/msg/pose_stamped.hpp> 
+#include <geometry_msgs/msg/transform_stamped.hpp> 
+#include "Utils.h"
 
-// -------------------
-// Cgmrf Constructor
-//--------------------
-Cgmrf::Cgmrf()
+using namespace std::placeholders;
+
+Cgmrf::Cgmrf() : Node("GMRF-wind")
 {
     printf("\n=================================================================");
     printf("\n=	             GMRF Wind-Distribution Mapping Node              =");
@@ -27,41 +29,40 @@ Cgmrf::Cgmrf()
     //------------------
     // Load Parameters
     //------------------
-    ros::NodeHandle param_n("~");
-    param_n.param<std::string>("frame_id", frame_id, "map");
-    param_n.param<std::string>("sensor_topic", sensor_topic, "/anemometer");
-    param_n.param<double>("exec_freq", exec_freq, 2.0);
-    param_n.param<double>("cell_size", cell_size, 0.5);
+    frame_id = declare_parameter<std::string>("frame_id", "map");
+    sensor_topic = declare_parameter<std::string>("sensor_topic", "/anemometer");
+    exec_freq = declare_parameter<double>("exec_freq", 2.0);
+    cell_size = declare_parameter<double>("cell_size", 0.5);
 
-    param_n.param<double>("GMRF_lambdaPrior_reg", GMRF_lambdaPrior_reg, 1);   // Weight for regularization prior -> neighbour cells have similar wind vectors
-    param_n.param<double>("GMRF_lambdaPrior_mass_conservation", GMRF_lambdaPrior_mass_conservation, 10000);   // Weight for mass conservation law prior
-    param_n.param<double>("GMRF_lambdaPrior_obstacles", GMRF_lambdaPrior_obstacles, 10);   //Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
-    param_n.param<double>("GMRF_lambdaObs", GMRF_lambdaObs, 10.0);       // [GMRF model] The initial weight (Lambda) of each observation
-    param_n.param<double>("GMRF_lambdaObsLoss", GMRF_lambdaObsLoss, 0.0);// [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
+    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1);   // Weight for regularization prior -> neighbour cells have similar wind vectors
+    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000);   // Weight for mass conservation law prior
+    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10);   //Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 10.0);       // [GMRF model] The initial weight (Lambda) of each observation
+    GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);// [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
 
 
-    param_n.param<std::string>("colormap", colormap, "jet");
-    param_n.param<int>("max_pclpoints_cell", max_pclpoints_cell, 20);
-    param_n.param<double>("min_sensor_val", min_sensor_val, 0.0);
-    param_n.param<double>("max_sensor_val", max_sensor_val, 0.0);
+    colormap = declare_parameter<std::string>("colormap", "jet");
+    max_pclpoints_cell = declare_parameter<int>("max_pclpoints_cell", 20);
+    min_sensor_val = declare_parameter<double>("min_sensor_val", 0.0);
+    max_sensor_val = declare_parameter<double>("max_sensor_val", 0.0);
 
-    param_n.param<double>("suggest_next_location_sensor_th", suggest_next_location_sensor_th, 0.1);
+    suggest_next_location_sensor_th = declare_parameter<double>("suggest_next_location_sensor_th", 0.1);
 
 
 
     //----------------------------------
     // Subscriptions
     //----------------------------------
-    sub_sensor = param_n.subscribe(sensor_topic, 1, &Cgmrf::sensorCallback, this);
-    ocupancyMap_sub = param_n.subscribe("/map", 1, &Cgmrf::mapCallback, this);
+    sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 1, std::bind(&Cgmrf::sensorCallback, this, _1) );
+    ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>("/map", 1, std::bind(&Cgmrf::mapCallback, this, _1));
     //----------------------------------
     // Publishers
     //----------------------------------
-    wind_array_pub = param_n.advertise<visualization_msgs::MarkerArray>("wind_array_pub", 0);
+    wind_array_pub = create_publisher<visualization_msgs::msg::MarkerArray>("wind_array_pub", 1);
     //----------------------------------
     // Services
     //----------------------------------
-    //ros::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
+    //rclcpp::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
     
 
     module_init = false;
@@ -74,12 +75,12 @@ Cgmrf::~Cgmrf(){}
 //--------------------------
 // CALLBACK - OCCUPANCY MAP
 //--------------------------
-void Cgmrf::mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
+void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
     if(module_init)
         return;
 
-    ROS_DEBUG("[GMRF-node] %s - Map of the environment!", __FUNCTION__);
+    RCLCPP_DEBUG(get_logger(), "[GMRF-node] %s - Map of the environment!", __FUNCTION__);
     occupancyMap = *msg;
 
     //Set GasMap dimensions as the OccupancyMap
@@ -89,8 +90,8 @@ void Cgmrf::mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
     double map_max_y =  msg->info.origin.position.y + msg->info.height*msg->info.resolution;
 
     //Create GMRF-Map and init
-    my_map = new CGMRF_map(occupancyMap, cell_size, GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, colormap, max_pclpoints_cell);
-    ROS_INFO("[GMRF-node] GMRF GridMap initialized");
+    my_map = new CGMRF_map(this, occupancyMap, cell_size, GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, colormap, max_pclpoints_cell);
+    RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF GridMap initialized");
 
     module_init = true;
 }
@@ -99,9 +100,10 @@ void Cgmrf::mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
 //----------------------------------
 // CALLBACK - NEW WIND OBSERVATION
 //----------------------------------
-void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
-{
-    //ROS_INFO("[GMRF-node] New wind observation! %.2f m/s  %.2f rad (Upwind in the Anemometer ref system)",msg->wind_speed, msg->wind_direction);
+void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
+{    
+    static auto tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock()); 
+    static auto tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);    
 
     //1. Get wind measurement
     double downwind_direction_map;
@@ -116,23 +118,23 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
         if (reading_speed != 0.0)
         {
             //Transform from anemometer ref_system to the map ref_system using TF
-            geometry_msgs::PoseStamped anemometer_upWind_pose, map_upWind_pose;
+            geometry_msgs::msg::PoseStamped anemometer_upWind_pose, map_upWind_pose;
             try
             {
                 anemometer_upWind_pose.header.frame_id = msg->header.frame_id.c_str();
                 anemometer_upWind_pose.pose.position.x = 0.0;
                 anemometer_upWind_pose.pose.position.y = 0.0;
                 anemometer_upWind_pose.pose.position.z = 0.0;
-                anemometer_upWind_pose.pose.orientation = tf::createQuaternionMsgFromYaw(msg->wind_direction);
+                anemometer_upWind_pose.pose.orientation = Utils::createQuaternionMsgFromYaw(msg->wind_direction);
 
                 //lookuptransform (target_frame, target_time, pose_in, fixed_frame, pose_out)
-                tf_listener.transformPose(frame_id.c_str(), anemometer_upWind_pose, map_upWind_pose);
+                tf_buffer->transform(anemometer_upWind_pose, map_upWind_pose, frame_id.c_str());
 
-                downwind_direction_map = angles::normalize_angle( tf::getYaw(map_upWind_pose.pose.orientation) + 3.14159 );
+                downwind_direction_map = angles::normalize_angle( Utils::getYaw(map_upWind_pose.pose.orientation) + 3.14159 );
             }
-            catch(tf::TransformException &ex)
+            catch(tf2::TransformException &ex)
             {
-                ROS_ERROR("[GMRF] - %s - Error: %s", __FUNCTION__, ex.what());
+                RCLCPP_ERROR(get_logger(), "[GMRF] - %s - Error: %s", __FUNCTION__, ex.what());
             }
         }
         else
@@ -141,25 +143,24 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
         }
     }
     catch(std::exception e){
-        ROS_ERROR("[GMRF] Exception at new Obs: %s ", e.what() );
+        RCLCPP_ERROR(get_logger(), "[GMRF] Exception at new Obs: %s ", e.what() );
     }
     mutex_anemometer.unlock();
-    //ROS_INFO("[GMRF-node] New wind observation! %.2f m/s  %.2f rad (DownWind in the map ref system)",msg->wind_speed, downwind_direction_map);
+    //RCLCPP_INFO(get_logger(), "[GMRF-node] New wind observation! %.2f m/s  %.2f rad (DownWind in the map ref system)",msg->wind_speed, downwind_direction_map);
 
 
     //2. Get pose of the sensor in the map reference system
-    tf::StampedTransform transform;
+    geometry_msgs::msg::TransformStamped transform;
     bool know_sensor_pose = true;
     try
     {
         //lookuptransform (target_frame, source_frame, result_tf)
-        tf_listener.lookupTransform(frame_id.c_str(),msg->header.frame_id.c_str(), ros::Time(0), transform);
+        transform = tf_buffer->lookupTransform(frame_id.c_str(),msg->header.frame_id.c_str(), rclcpp::Time(0));
     }
-    catch (tf::TransformException ex)
+    catch (tf2::TransformException ex)
     {
-        ROS_ERROR("[GMRF] exception when reading observation: %s",ex.what());
+        RCLCPP_ERROR(get_logger(), "[GMRF] exception when reading observation: %s",ex.what());
         know_sensor_pose = false;
-        ros::Duration(1.0).sleep();
     }
 
 
@@ -167,11 +168,11 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
     if (module_init)
     {
         //Current sensor pose in the map
-        float x_pos = transform.getOrigin().x();
-        float y_pos = transform.getOrigin().y();
+        float x_pos = transform.transform.translation.x;
+        float y_pos = transform.transform.translation.y;
 
         mutex_anemometer.lock();
-        //ROS_INFO("[GMRF] New obs: %.2f m/s, %.2f rad at (%.2f,%.2f)", reading_speed,reading_direction,x_pos,y_pos);
+        //RCLCPP_INFO(get_logger(), "[GMRF] New obs: %.2f m/s, %.2f rad at (%.2f,%.2f)", reading_speed,reading_direction,x_pos,y_pos);
         my_map->insertObservation_GMRF(reading_speed, downwind_direction_map, x_pos, y_pos, GMRF_lambdaObs);
         mutex_anemometer.unlock();
     }
@@ -182,20 +183,20 @@ void Cgmrf::sensorCallback(const olfaction_msgs::anemometerConstPtr msg)
 
 void Cgmrf::publishMaps()
 {
-    visualization_msgs::MarkerArray wind_array;
+    visualization_msgs::msg::MarkerArray wind_array;
     my_map->get_as_markerArray(wind_array, frame_id);
-    wind_array_pub.publish(wind_array);
+    wind_array_pub->publish(wind_array);
 }
 
 
-bool Cgmrf::get_wind_value_srv(gmrf_wind_mapping::WindEstimation::Request  &req, gmrf_wind_mapping::WindEstimation::Response &res)
+bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res)
 {
     //Since the wind fields are identical among different instances, return just the information from instance[0]
-    for(int i=0;i<req.x.size();i++){
-        Eigen::Vector3d r = my_map->getEstimation(req.x[i], req.y[i]);
-        res.u.push_back(r.x());
-        res.v.push_back(r.y());
-        res.stdevAngle.push_back(r.z());
+    for(int i=0;i<req->x.size();i++){
+        Eigen::Vector3d r = my_map->getEstimation(req->x[i], req->y[i]);
+        res->u.push_back(r.x());
+        res->v.push_back(r.y());
+        res->stdev_angle.push_back(r.z());
     }
     return true;
 }
@@ -205,31 +206,31 @@ bool Cgmrf::get_wind_value_srv(gmrf_wind_mapping::WindEstimation::Request  &req,
 //----------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
-	ros::init(argc, argv, "gmrf_node");
-    ros::NodeHandle n;
-	Cgmrf my_gmrf_map;
-    ros::ServiceServer service = n.advertiseService("WindEstimation", &Cgmrf::get_wind_value_srv, &my_gmrf_map);
-	ROS_INFO("[gmrf] LOOP....");
-	ros::Time last_publication_time = ros::Time::now();
-	ros::Rate loop_rate(my_gmrf_map.exec_freq);
-	
-	while (ros::ok())
-	{
-		ros::spinOnce();                    //Callbacks & Services
+	rclcpp::init(argc, argv);
+	auto my_gmrf_map = std::make_shared<Cgmrf>();
 
-		if (my_gmrf_map.module_init)
+    auto service = my_gmrf_map->create_service<WindEstimation>("WindEstimation", std::bind(&Cgmrf::get_wind_value_srv, my_gmrf_map.get(), _1, _2) );
+	RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] LOOP....");
+	rclcpp::Time last_publication_time = my_gmrf_map->now();
+	rclcpp::Rate loop_rate(my_gmrf_map->exec_freq);
+	
+	while (rclcpp::ok())
+	{
+		rclcpp::spin_some(my_gmrf_map);                    //Callbacks & Services
+
+		if (my_gmrf_map->module_init)
 		{
 			// Update and Publish maps
-			my_gmrf_map.my_map->updateMapEstimation_GMRF(my_gmrf_map.GMRF_lambdaObsLoss);
-            my_gmrf_map.publishMaps();
+			my_gmrf_map->my_map->updateMapEstimation_GMRF(my_gmrf_map->GMRF_lambdaObsLoss);
+            my_gmrf_map->publishMaps();
 			
 			// Info about actual rate
-			ROS_INFO("[gmrf] Updating every %f seconds. Intended preiod was %f", (ros::Time::now()-last_publication_time).toSec(), 1.0/my_gmrf_map.exec_freq);
-			last_publication_time = ros::Time::now();
+			RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] Updating every %f seconds. Intended preiod was %f", (my_gmrf_map->now()-last_publication_time).seconds(), 1.0/my_gmrf_map->exec_freq);
+			last_publication_time = my_gmrf_map->now();
 		}
         else
         {
-			ROS_INFO("[gmrf] Waiting for initialization (Map of environment).");
+			RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] Waiting for initialization (Map of environment).");
 		}
         	loop_rate.sleep();
 	}
