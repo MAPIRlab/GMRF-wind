@@ -65,4 +65,9 @@ ament_target_dependencies(gmrf_wind_mapping_node
     geometry_msgs
 )
 
+install(
+  TARGETS gmrf_wind_mapping_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
