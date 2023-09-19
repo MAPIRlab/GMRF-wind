@@ -51,7 +51,10 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
 	// Subscriptions
 	//----------------------------------
 	sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 1, std::bind(&Cgmrf::sensorCallback, this, _1));
-	ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>("map", 1, std::bind(&Cgmrf::mapCallback, this, _1));
+	ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(
+		declare_parameter<std::string>("map_topic", "map"),
+		rclcpp::QoS(1).transient_local().reliable(),
+		std::bind(&Cgmrf::mapCallback, this, _1));
 	//----------------------------------
 	// Publishers
 	//----------------------------------
@@ -181,6 +184,12 @@ void Cgmrf::publishMaps()
 
 bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res)
 {
+	if (!module_init)
+	{
+		RCLCPP_ERROR(get_logger(), "Trying to query GMRF wind, but it is not initialized yet (probably has not received the occupancy map)");
+		return false;
+	}
+
 	// Since the wind fields are identical among different instances, return just the information from instance[0]
 	for (int i = 0; i < req->x.size(); i++)
 	{

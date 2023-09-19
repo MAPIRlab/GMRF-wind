@@ -74,9 +74,9 @@ protected:
 	// functions
 	bool is_cell_free(size_t id_gmrf);
 	bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
-	inline int x2idx(float x) const { return static_cast<int>((x - m_x_min) / m_resolution); }
-	inline int y2idx(float y) const { return static_cast<int>((y - m_y_min) / m_resolution); }
-	inline int xy2idx(float x, float y) const { return x2idx(x) + y2idx(y) * m_size_x; }
+
+	int xy2idx(float x, float y) const;
+
 	void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);
 	void id2xy(size_t id, double& x, double& y);
 

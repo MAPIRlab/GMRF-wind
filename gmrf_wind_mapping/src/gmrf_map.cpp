@@ -1151,3 +1151,10 @@ void CGMRF_map::init_colormaps(std::string colormap)
 		}
 	}
 }
+
+int CGMRF_map::xy2idx(float x, float y) const
+{
+	int x_idx = static_cast<int>((x - m_x_min) / m_resolution);
+	int y_idx = static_cast<int>((y - m_y_min) / m_resolution);
+	return x_idx + y_idx * m_size_x;
+}
