@@ -4,7 +4,7 @@ set(CMAKE_BUILD_TYPE "None")
 
 
 
-set(DEBUG ON)
+set(DEBUG OFF)
 
 if(DEBUG)
   add_definitions(-DDEBUG)
