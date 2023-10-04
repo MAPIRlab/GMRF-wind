@@ -60,52 +60,52 @@ using WindEstimation = gmrf_wind_mapping::srv::WindEstimation;
 class Cgmrf : public rclcpp::Node
 {
 public:
-	Cgmrf();
-	~Cgmrf();
-	void publishMaps();
-	bool get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res);
+    Cgmrf();
+    ~Cgmrf();
+    void publishMaps();
+    bool get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res);
 
-	// GMRF variables
-	std::unique_ptr<CGMRF_map> my_map;                         // The Online Gas Distribution Map being generated
-	nav_msgs::msg::OccupancyGrid occupancyMap; // Occupancy GridMap of the environment
+    // GMRF variables
+    std::unique_ptr<CGMRF_map> my_map;         // The Online Gas Distribution Map being generated
+    nav_msgs::msg::OccupancyGrid occupancyMap; // Occupancy GridMap of the environment
 
-	// Node Params
-	std::string sensor_topic;
-	std::string frame_id; // frame where to plot the map, usually (map)
-	double cell_size;
-	double exec_freq;
-	std::string colormap;
-	int max_pclpoints_cell;
-	double max_sensor_val;
-	double min_sensor_val;
-	double suggest_next_location_sensor_th;
+    // Node Params
+    std::string sensor_topic;
+    std::string frame_id; // frame where to plot the map, usually (map)
+    double cell_size;
+    double exec_freq;
+    std::string colormap;
+    int max_pclpoints_cell;
+    double max_sensor_val;
+    double min_sensor_val;
+    double suggest_next_location_sensor_th;
 
-	double GMRF_lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
-	double GMRF_lambdaPrior_mass_conservation; // Weight for mass conservation law prior
-	double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
-	double GMRF_lambdaObs;                     // [GMRF model] The initial information (Lambda) of each observation (this information will decrease with time)
-	double GMRF_lambdaObsLoss;                 // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
+    double GMRF_lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
+    double GMRF_lambdaPrior_mass_conservation; // Weight for mass conservation law prior
+    double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    double GMRF_lambdaObs;     // [GMRF model] The initial information (Lambda) of each observation (this information will decrease with time)
+    double GMRF_lambdaObsLoss; // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
 
-	// Variables
-	bool module_init;
-	boost::mutex mutex_anemometer;
-	boost::mutex mutex_position;
-	double reading_speed;     // m/s
-	double reading_direction; // rad
-	bool new_data_position;
-	float curr_x;
-	float curr_y;
-	bool verbose;
+    // Variables
+    bool module_init;
+    boost::mutex mutex_anemometer;
+    boost::mutex mutex_position;
+    double reading_speed;     // m/s
+    double reading_direction; // rad
+    bool new_data_position;
+    float curr_x;
+    float curr_y;
+    bool verbose;
 
 protected:
-	// Subscriptions & Publishers
-	rclcpp::Subscription<olfaction_msgs::msg::Anemometer>::SharedPtr sub_sensor;
-	rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr ocupancyMap_sub;
-	rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
+    // Subscriptions & Publishers
+    rclcpp::Subscription<olfaction_msgs::msg::Anemometer>::SharedPtr sub_sensor;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr ocupancyMap_sub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
 
-	// Callbacks
-	void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
-	void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+    // Callbacks
+    void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
+    void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
 };
 
 //-------------------------------------------------------
