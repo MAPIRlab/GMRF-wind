@@ -684,12 +684,21 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
 {
     try
     {
+        auto add_obs = [this](const TobservationGMRF& observation)
+        {
+            if(observation.cell_idx <0 || observation.cell_idx > N)
+            {
+                RCLCPP_ERROR(node->get_logger(), "Observation is outside of the map!");
+                return;
+            }
+            activeObs.push_back(observation);
+        };
+        const int cellIdx = xy2idx(x_pos, y_pos);
         // Fill new Observation
         // The wind vector provided is already the DownWind direction in the map reference system
-        if (x_pos <= m_x_min || x_pos >= m_x_max || y_pos <= m_y_min || y_pos >= m_y_max)
+        if (x_pos <= m_x_min || x_pos >= m_x_max || y_pos <= m_y_min || y_pos >= m_y_max || !is_cell_free(cellIdx))
             return;
 
-        const int cellIdx = xy2idx(x_pos, y_pos);
         TobservationGMRF new_obs;
         new_obs.cell_idx = cellIdx;
         new_obs.windX = wind_speed * cos(wind_direction);
@@ -700,26 +709,26 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
             RCLCPP_INFO(node->get_logger(), "[GMRF] New obs: Wx = %.2f m/s Wy = %.2f m/s", new_obs.windX, new_obs.windY);
 
         // Add Observation to GMRF
-        activeObs.push_back(new_obs);
+        add_obs(new_obs);
         nObsFactors += 2; // we add 2 factors foe each observation to account for Wx and Wy components
 
         // NOTE --> We create 4 observations to expand a bit the measurement impact, replicating the content to neighbour cells
         if (is_cell_free(cellIdx - 1))
         {
             new_obs.cell_idx = cellIdx - 1;
-            activeObs.push_back(new_obs);
+            add_obs(new_obs);
             nObsFactors += 2;
         }
         if (is_cell_free(cellIdx - m_size_x))
         {
             new_obs.cell_idx = cellIdx - m_size_x;
-            activeObs.push_back(new_obs);
+            add_obs(new_obs);
             nObsFactors += 2;
         }
         if (is_cell_free(cellIdx - m_size_x - 1))
         {
             new_obs.cell_idx = cellIdx - m_size_x - 1;
-            activeObs.push_back(new_obs);
+            add_obs(new_obs);
             nObsFactors += 2;
         }
     }
