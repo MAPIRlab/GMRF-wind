@@ -54,7 +54,7 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
     //----------------------------------
     // Subscriptions
     //----------------------------------
-    sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 1, std::bind(&Cgmrf::sensorCallback, this, _1));
+    sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 5, std::bind(&Cgmrf::sensorCallback, this, _1));
     ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(
         declare_parameter<std::string>("map_topic", "map"), rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
     //----------------------------------
@@ -116,6 +116,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
         reading_speed = msg->wind_speed;         // (m/s)
         reading_direction = msg->wind_direction; // (rad) This is the Upwind direction with respect the Anemometer ref system (standard measurement)
 
+        //RCLCPP_INFO(get_logger(), "Speed:%f Direction:%f", reading_speed, reading_direction);
         // We need to transform this Upwind direction in the Anemometer ref system---- to ---- DownWind direction in the MAP ref system
         if (reading_speed != 0.0)
         {
