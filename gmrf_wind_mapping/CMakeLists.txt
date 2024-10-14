@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
 project(gmrf_wind_mapping)
-set(CMAKE_BUILD_TYPE "None") 
 
 
 
@@ -8,8 +7,10 @@ set(DEBUG OFF)
 
 if(DEBUG)
   add_definitions(-DDEBUG)
+  set(CMAKE_BUILD_TYPE "Debug") 
   set(CMAKE_CXX_FLAGS "-g -O0 ${CMAKE_CXX_FLAGS}")
 else()
+  set(CMAKE_BUILD_TYPE "Release") 
   set(CMAKE_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
 endif(DEBUG)
 
@@ -26,17 +27,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED) 
 find_package(olfaction_msgs REQUIRED) 
 find_package(geometry_msgs REQUIRED) 
-find_package(rosidl_default_generators REQUIRED) 
-
-## System dependencies are found with CMake's conventions
-
-
-rosidl_generate_interfaces(${PROJECT_NAME}
-    srv/WindEstimation.srv
-    DEPENDENCIES std_msgs
-)
-ament_export_dependencies(rosidl_default_runtime)
-
+find_package(gmrf_msgs REQUIRED) 
 
 
 FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
@@ -46,10 +37,6 @@ include_directories(
 )
 
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
-
-rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(gmrf_wind_mapping_node "${cpp_typesupport_target}") 
-
 
 ament_target_dependencies(gmrf_wind_mapping_node
     rclcpp
@@ -63,6 +50,7 @@ ament_target_dependencies(gmrf_wind_mapping_node
     visualization_msgs
     olfaction_msgs
     geometry_msgs
+    gmrf_msgs
 )
 
 install(

@@ -53,9 +53,9 @@
 #include "gmrf_map.h"
 
 // Services
-#include "gmrf_wind_mapping/srv/wind_estimation.hpp"
+#include "gmrf_msgs/srv/wind_estimation.hpp"
 
-using WindEstimation = gmrf_wind_mapping::srv::WindEstimation;
+using WindEstimation = gmrf_msgs::srv::WindEstimation;
 
 class Cgmrf : public rclcpp::Node
 {

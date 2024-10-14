@@ -54,7 +54,7 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
     //----------------------------------
     // Subscriptions
     //----------------------------------
-    sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 5, std::bind(&Cgmrf::sensorCallback, this, _1));
+    sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 10, std::bind(&Cgmrf::sensorCallback, this, _1));
     ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(
         declare_parameter<std::string>("map_topic", "map"), rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
     //----------------------------------
@@ -124,7 +124,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
             geometry_msgs::msg::PoseStamped anemometer_upWind_pose, map_upWind_pose;
             try
             {
-                anemometer_upWind_pose.header.frame_id = msg->header.frame_id.c_str();
+                anemometer_upWind_pose.header = msg->header;
                 anemometer_upWind_pose.pose.position.x = 0.0;
                 anemometer_upWind_pose.pose.position.y = 0.0;
                 anemometer_upWind_pose.pose.position.z = 0.0;
@@ -159,7 +159,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
     try
     {
         // lookuptransform (target_frame, source_frame, result_tf)
-        transform = tf_buffer->lookupTransform(frame_id.c_str(), msg->header.frame_id.c_str(), rclcpp::Time(0));
+        transform = tf_buffer->lookupTransform(frame_id.c_str(), msg->header.frame_id.c_str(), msg->header.stamp);
     }
     catch (tf2::TransformException ex)
     {
