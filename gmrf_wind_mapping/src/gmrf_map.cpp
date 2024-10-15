@@ -611,6 +611,7 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
     catch (std::exception e)
     {
         RCLCPP_ERROR(node->get_logger(), "[GMRF] Exception while checking cell freedom: %s ", e.what());
+        return false;
     }
 }
 
