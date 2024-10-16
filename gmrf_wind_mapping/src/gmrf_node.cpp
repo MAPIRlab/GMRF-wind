@@ -14,8 +14,10 @@
 //========================================================================================
 
 #include "gmrf_node.h"
+#include <chrono>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <tf2/time.h>
 #include "Utils.h"
 
 using namespace std::placeholders;
@@ -66,6 +68,10 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
     //----------------------------------
     // rclcpp::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
 
+
+    tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock(), tf2::Duration(std::chrono::seconds(30)));
+    tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
+
     verbose = declare_parameter<bool>("verbose", false);
 
     module_init = false;
@@ -105,9 +111,6 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 //----------------------------------
 void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
 {
-    static auto tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock());
-    static auto tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
-
     // 1. Get wind measurement
     double downwind_direction_map;
     mutex_anemometer.lock();
