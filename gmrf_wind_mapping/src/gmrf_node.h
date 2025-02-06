@@ -104,9 +104,10 @@ protected:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
     tf2_ros::Buffer::SharedPtr tf_buffer;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener;
-    // Callbacks
+
     void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+    void initialize();
 };
 
 //-------------------------------------------------------

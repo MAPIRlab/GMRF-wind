@@ -14,15 +14,16 @@
 //========================================================================================
 
 #include "gmrf_node.h"
+#include "Utils.h"
 #include <chrono>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2/time.h>
-#include "Utils.h"
 
 using namespace std::placeholders;
 
-Cgmrf::Cgmrf() : Node("GMRF_wind")
+Cgmrf::Cgmrf()
+    : Node("GMRF_wind")
 {
     printf("\n=================================================================");
     printf("\n=	             GMRF Wind-Distribution Mapping Node              =");
@@ -41,7 +42,7 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
     GMRF_lambdaPrior_mass_conservation =
         declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000); // Weight for mass conservation law prior
     GMRF_lambdaPrior_obstacles = declare_parameter<double>(
-        "GMRF_lambdaPrior_obstacles", 10); // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+        "GMRF_lambdaPrior_obstacles", 10);                              // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
     GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 10.0); // [GMRF model] The initial weight (Lambda) of each observation
     GMRF_lambdaObsLoss = declare_parameter<double>(
         "GMRF_lambdaObsLoss", 0.0); // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
@@ -68,7 +69,6 @@ Cgmrf::Cgmrf() : Node("GMRF_wind")
     //----------------------------------
     // rclcpp::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
 
-
     tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock(), tf2::Duration(std::chrono::seconds(30)));
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
 
@@ -89,14 +89,32 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     if (module_init)
         return;
 
-    RCLCPP_DEBUG(get_logger(), "[GMRF-node] %s - Map of the environment!", __FUNCTION__);
-    occupancyMap = *msg;
+    // we can choose to read a map file directly from disk, if we don't want to use the one published by map_server
+    // this is often useful when we need to alter the occupancy map to include outlets, which should be empty for GMRF but which may not be navigable (think windows)
+    std::string mapFilePath = declare_parameter<std::string>("map_file", "");
+    if (mapFilePath != "")
+    {
+        RCLCPP_INFO(get_logger(), "Reading map from file '%s'", mapFilePath.c_str());
+        occupancyMap = Utils::parseMapImage(mapFilePath);
+        occupancyMap.header = msg->header;
+        occupancyMap.info = msg->info;
+    }
+    else
+    {
+        occupancyMap = *msg;
+        RCLCPP_INFO(get_logger(), "Using map from topic '%s'", ocupancyMap_sub->get_topic_name());
+    }
 
+    initialize();
+}
+
+void Cgmrf::initialize()
+{
     // Set GasMap dimensions as the OccupancyMap
-    double map_min_x = msg->info.origin.position.x;
-    double map_max_x = msg->info.origin.position.x + msg->info.width * msg->info.resolution;
-    double map_min_y = msg->info.origin.position.y;
-    double map_max_y = msg->info.origin.position.y + msg->info.height * msg->info.resolution;
+    double map_min_x = occupancyMap.info.origin.position.x;
+    double map_max_x = occupancyMap.info.origin.position.x + occupancyMap.info.width * occupancyMap.info.resolution;
+    double map_min_y = occupancyMap.info.origin.position.y;
+    double map_max_y = occupancyMap.info.origin.position.y + occupancyMap.info.height * occupancyMap.info.resolution;
 
     // Create GMRF-Map and init
     my_map = std::make_unique<CGMRF_map>(this, occupancyMap, cell_size, GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation,
@@ -119,8 +137,8 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
         reading_speed = msg->wind_speed;         // (m/s)
         reading_direction = msg->wind_direction; // (rad) This is the Upwind direction with respect the Anemometer ref system (standard measurement)
 
-        //RCLCPP_INFO(get_logger(), "Speed:%f Direction:%f", reading_speed, reading_direction);
-        // We need to transform this Upwind direction in the Anemometer ref system---- to ---- DownWind direction in the MAP ref system
+        // RCLCPP_INFO(get_logger(), "Speed:%f Direction:%f", reading_speed, reading_direction);
+        //  We need to transform this Upwind direction in the Anemometer ref system---- to ---- DownWind direction in the MAP ref system
         if (reading_speed != 0.0)
         {
             // Transform from anemometer ref_system to the map ref_system using TF
