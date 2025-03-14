@@ -223,10 +223,11 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
         return false;
     }
 
+    Eigen::Vector2i dimensions = my_map->map_size();
+    res->map_width = dimensions.x();
     // an empty request means get all the points
     if (req->x.empty())
     {
-        Eigen::Vector2i dimensions = my_map->map_size();
         size_t size = dimensions.x() * dimensions.y();
 
         res->u.reserve(size);
