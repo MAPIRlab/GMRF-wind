@@ -1,10 +1,10 @@
 #pragma once
 
+#include <filesystem>
 #include <geometry_msgs/msg/quaternion.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <filesystem>
 #include <opencv2/highgui.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 namespace Utils
 {
@@ -39,11 +39,10 @@ namespace Utils
         size_t height = mapImage.size().height;
 
         nav_msgs::msg::OccupancyGrid occupancyGrid;
-        occupancyGrid.data.resize(width*height);
+        occupancyGrid.data.resize(width * height);
         for (int i = 0; i < width * height; i++)
-            occupancyGrid.data[i] = (int8_t) (100 - std::clamp( (int)mapImage.data[i], 0, 100));
+            occupancyGrid.data[i] = (int8_t)(100 - std::clamp((int)mapImage.data[i], 0, 100));
 
         return occupancyGrid;
     }
-
-}
+} // namespace Utils

@@ -1,11 +1,11 @@
 
 #include "rclcpp/rclcpp.hpp"
-#include <nav_msgs/msg/occupancy_grid.hpp>
-#include <eigen3/Eigen/Sparse>
-#include <fstream> // std::ofstream
 #include "visualization_msgs/msg/marker.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
-#include <math.h> /* atan2 */
+#include <eigen3/Eigen/Sparse>
+#include <fstream> // std::ofstream
+#include <math.h>  /* atan2 */
+#include <nav_msgs/msg/occupancy_grid.hpp>
 
 #define NUM_CELL_TEMPLATES 200 // For plotting only
 struct TRandomFieldCell
@@ -31,7 +31,13 @@ public:
     // Visualization
     void get_as_markerArray(visualization_msgs::msg::MarkerArray& ma, std::string frame_id);
 
+    Eigen::Vector3d getEstimation(int index);
     Eigen::Vector3d getEstimation(double x, double y);
+
+    Eigen::Vector2i map_size()
+    {
+        return {m_size_x, m_size_y};
+    }
 
 protected:
     rclcpp::Node* node;

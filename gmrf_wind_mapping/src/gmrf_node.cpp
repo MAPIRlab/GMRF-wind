@@ -105,6 +105,12 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         RCLCPP_INFO(get_logger(), "Using map from topic '%s'", ocupancyMap_sub->get_topic_name());
     }
 
+    // publish the actual map we are using, in case it is different from the one published by map_server
+    static rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_republisher =
+        create_publisher<nav_msgs::msg::OccupancyGrid>("gmrf_occupancy", rclcpp::QoS(1).transient_local());
+
+    map_republisher->publish(occupancyMap);
+
     initialize();
 }
 
@@ -215,6 +221,27 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
     {
         RCLCPP_ERROR(get_logger(), "Trying to query GMRF wind, but it is not initialized yet (probably has not received the occupancy map)");
         return false;
+    }
+
+    // an empty request means get all the points
+    if (req->x.empty())
+    {
+        Eigen::Vector2i dimensions = my_map->map_size();
+        size_t size = dimensions.x() * dimensions.y();
+
+        res->u.reserve(size);
+        res->v.reserve(size);
+        res->stdev_angle.reserve(size);
+
+        for (int i = 0; i < size; i++)
+        {
+            Eigen::Vector3d r = my_map->getEstimation(i);
+            res->u.push_back(r.x());
+            res->v.push_back(r.y());
+            res->stdev_angle.push_back(r.z());
+        }
+
+        return true;
     }
 
     // Since the wind fields are identical among different instances, return just the information from instance[0]

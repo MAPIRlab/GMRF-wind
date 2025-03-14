@@ -891,14 +891,19 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
     }
 }
 
+Eigen::Vector3d CGMRF_map::getEstimation(int index)
+{
+    double module = sqrt(pow(m_map[index].mean, 2) + pow(m_map[index + N].mean, 2));
+    double direction = atan2(m_map[index + N].mean, m_map[index].mean);
+    double stdev = std::max(0.1, sqrt(pow(m_map[index].std, 2) + pow(m_map[index + N].std, 2)));
+
+    return Eigen::Vector3d(module, direction, stdev);
+}
+
 Eigen::Vector3d CGMRF_map::getEstimation(double x, double y)
 {
     int i = xy2idx(x, y);
-    double module = sqrt(pow(m_map[i].mean, 2) + pow(m_map[i + N].mean, 2));
-    double direction = atan2(m_map[i + N].mean, m_map[i].mean);
-    double stdev = std::max(0.1, sqrt(pow(m_map[i].std, 2) + pow(m_map[i + N].std, 2)));
-
-    return Eigen::Vector3d(module, direction, stdev);
+    return getEstimation(i);
 }
 
 void CGMRF_map::get_as_markerArray(visualization_msgs::msg::MarkerArray& ma, std::string frame_id)
