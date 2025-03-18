@@ -2,17 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(gmrf_wind_mapping)
 
 
-
-set(DEBUG OFF)
-
-if(DEBUG)
-  add_definitions(-DDEBUG)
-  set(CMAKE_BUILD_TYPE "Debug") 
-  set(CMAKE_CXX_FLAGS "-g -O0 ${CMAKE_CXX_FLAGS}")
-else()
-  set(CMAKE_BUILD_TYPE "Release") 
-  set(CMAKE_CXX_FLAGS "-O3 ${CMAKE_CXX_FLAGS}")
-endif(DEBUG)
+set(CMAKE_BUILD_TYPE "Release") 
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${CMAKE_CXX_FLAGS}")
 
 
 find_package(ament_cmake REQUIRED)

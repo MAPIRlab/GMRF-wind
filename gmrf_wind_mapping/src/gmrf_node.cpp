@@ -236,10 +236,11 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
 
         for (int i = 0; i < size; i++)
         {
-            Eigen::Vector3d r = my_map->getEstimation(i);
-            res->u.push_back(r.x());
-            res->v.push_back(r.y());
-            res->stdev_angle.push_back(r.z());
+            WindVector r = my_map->getEstimation(i);
+            Eigen::Vector2d vec = r.asEigen();
+            res->u.push_back(vec.x());
+            res->v.push_back(vec.y());
+            res->stdev_angle.push_back(r.stdDev);
         }
 
         return true;
@@ -248,10 +249,11 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
     // Since the wind fields are identical among different instances, return just the information from instance[0]
     for (int i = 0; i < req->x.size(); i++)
     {
-        Eigen::Vector3d r = my_map->getEstimation(req->x[i], req->y[i]);
-        res->u.push_back(r.x());
-        res->v.push_back(r.y());
-        res->stdev_angle.push_back(r.z());
+        WindVector r = my_map->getEstimation(req->x[i], req->y[i]);
+        Eigen::Vector2d vec = r.asEigen();
+        res->u.push_back(vec.x());
+        res->v.push_back(vec.y());
+        res->stdev_angle.push_back(r.stdDev);
     }
     return true;
 }

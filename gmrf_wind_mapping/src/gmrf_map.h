@@ -14,6 +14,20 @@ struct TRandomFieldCell
     double std;
 };
 
+struct WindVector
+{
+    double module;
+    double direction;
+    double stdDev;
+
+    Eigen::Vector2d asEigen()
+    {
+        double x = module * std::cos(direction);
+        double y = module * std::sin(direction);
+        return Eigen::Vector2d(x, y);
+    }
+};
+
 /** GMRF class implementing the probability map and methods for insterting new observations and update the map */
 class CGMRF_map
 {
@@ -31,8 +45,8 @@ public:
     // Visualization
     void get_as_markerArray(visualization_msgs::msg::MarkerArray& ma, std::string frame_id);
 
-    Eigen::Vector3d getEstimation(int index);
-    Eigen::Vector3d getEstimation(double x, double y);
+    WindVector getEstimation(int index);
+    WindVector getEstimation(double x, double y);
 
     Eigen::Vector2i map_size()
     {
