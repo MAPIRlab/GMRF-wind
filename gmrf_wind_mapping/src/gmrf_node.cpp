@@ -13,8 +13,8 @@
 //	version: 1.0	23/02/2017
 //========================================================================================
 
-#include "gmrf_node.h"
-#include "Utils.h"
+#include "gmrf_wind_mapping/gmrf_node.h"
+#include "gmrf_wind_mapping/utils.h"
 #include <chrono>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>

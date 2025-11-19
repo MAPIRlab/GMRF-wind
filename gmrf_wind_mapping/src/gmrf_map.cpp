@@ -1,5 +1,5 @@
-#include "gmrf_map.h"
-#include "Utils.h"
+#include "gmrf_wind_mapping/gmrf_map.h"
+#include "gmrf_wind_mapping/utils.h"
 
 /*---------------------------------------------------------------
                         Constructor
