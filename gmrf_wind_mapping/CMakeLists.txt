@@ -6,7 +6,7 @@ set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${CMAKE_CXX_FLAGS}")
 
-
+# DEPENDENCIES
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED) 
 find_package(angles REQUIRED) 
@@ -25,14 +25,17 @@ find_package(OpenCV REQUIRED)
 
 FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
 
+# INCLUDES
 include_directories(
   include
   )
-  
+
+# BUILDING
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
 target_include_directories(gmrf_wind_mapping_node PUBLIC ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS})
-  
+
+
 ament_target_dependencies(gmrf_wind_mapping_node
     rclcpp
     angles
