@@ -28,7 +28,15 @@ FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
 # INCLUDES
 include_directories(
   include
-  )
+  ${EIGEN3_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+)
+
+# Install launch files and related config files.
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
 # BUILDING
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
