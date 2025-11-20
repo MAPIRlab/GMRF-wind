@@ -22,7 +22,19 @@ def generate_launch_description():
                 name='gmrf_wind_mapping_node',
                 output='screen',
                 parameters=[{
-                    'param_name' : 'value'
+                    "frame_id", "map",                              # Frame where to plot the map, usually (map)
+                    "sensor_topic", "/anemometer",                  # Topic where the anemometer measurements are published
+                    "map_file", "",                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+                    "map_topic", "map",                             # Topic where the Occupancy GridMap is published
+                    "exec_freq", 2.0,                               # Frequency (Hz) to execute the GMRF update step
+                    "cell_size", 0.5,                               # Size of each cell in the GMRF grid (meters)
+                    "verbose", false,                               # Verbose mode for debugging
+                    # Lambda weights for the different priors & Obs in the GMRF model
+                    "GMRF_lambdaPrior_reg", 1,                      # Regularization -> neighbour cells have similar wind vectors
+                    "GMRF_lambdaPrior_mass_conservation", 10000,    # Mass conservation law -> divergence of the wind field is zero
+                    "GMRF_lambdaPrior_obstacles", 10,               # Obstacles --> cells close to obstacles has only tangencial wind
+                    "GMRF_lambdaObs", 10.0,                         # The initial weight (Lambda) of each observation
+                    "GMRF_lambdaObsLoss", 0.0                       # The loss of information (Lambda) of the observations with each iteration
                     }],
             ),
     ])
