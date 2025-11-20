@@ -3,21 +3,23 @@
 //	Description: Implements the Gaussian Markov random field mapping algorithm for the
 //               estimation of the windflow from a set of sparse 2D wind measurements.
 //
-//	topics subscribed:
-//  topics published:
-//	services:
+//	topics subscribed: Anemometer measurements, Occupancy GridMap
+//  topics published: - 
+//	services: WindEstimation - service to get wind estimation at a given 2D location
 //
 //----------------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------------
 //	Revision log:
-//	version: 1.0	23/02/2017
+//	version: 2.0	20/11/2025
 //========================================================================================
 
 #include "gmrf_wind_mapping/gmrf_node.h"
 #include "gmrf_wind_mapping/utils.h"
-#include <chrono>
+
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+
+#include <chrono>
 #include <tf2/time.h>
 
 using namespace std::placeholders;
@@ -26,60 +28,52 @@ Cgmrf::Cgmrf()
     : Node("GMRF_wind")
 {
     printf("\n=================================================================");
-    printf("\n=	             GMRF Wind-Distribution Mapping Node              =");
+    printf("\n=	        GMRF Wind-Distribution Mapping ROS2 Node              =");
     printf("\n=================================================================\n");
-
-    //------------------
+    
     // Load Parameters
     //------------------
     frame_id = declare_parameter<std::string>("frame_id", "map");
     sensor_topic = declare_parameter<std::string>("sensor_topic", "/anemometer");
+    mapFilePath = declare_parameter<std::string>("map_file", "");
+    map_topic = declare_parameter<std::string>("map_topic", "map");
     exec_freq = declare_parameter<double>("exec_freq", 2.0);
     cell_size = declare_parameter<double>("cell_size", 0.5);
-
-    GMRF_lambdaPrior_reg =
-        declare_parameter<double>("GMRF_lambdaPrior_reg", 1); // Weight for regularization prior -> neighbour cells have similar wind vectors
-    GMRF_lambdaPrior_mass_conservation =
-        declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000); // Weight for mass conservation law prior
-    GMRF_lambdaPrior_obstacles = declare_parameter<double>(
-        "GMRF_lambdaPrior_obstacles", 10);                              // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
-    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 10.0); // [GMRF model] The initial weight (Lambda) of each observation
-    GMRF_lambdaObsLoss = declare_parameter<double>(
-        "GMRF_lambdaObsLoss", 0.0); // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
-
-    colormap = declare_parameter<std::string>("colormap", "jet");
-    max_pclpoints_cell = declare_parameter<int>("max_pclpoints_cell", 20);
-    min_sensor_val = declare_parameter<double>("min_sensor_val", 0.0);
-    max_sensor_val = declare_parameter<double>("max_sensor_val", 0.0);
-
-    suggest_next_location_sensor_th = declare_parameter<double>("suggest_next_location_sensor_th", 0.1);
-
-    //----------------------------------
+    verbose = declare_parameter<bool>("verbose", false);
+    // Lamnda/weights for the different priors and observation factors
+    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1);
+    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000);
+    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10);
+    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 10.0);
+    GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
+    
     // Subscriptions
     //----------------------------------
     sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 10, std::bind(&Cgmrf::sensorCallback, this, _1));
     ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(
-        declare_parameter<std::string>("map_topic", "map"), rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
-    //----------------------------------
+        map_topic, rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
+        
     // Publishers
     //----------------------------------
     wind_array_pub = create_publisher<visualization_msgs::msg::MarkerArray>("wind_array_pub", 1);
-    //----------------------------------
+    
     // Services
     //----------------------------------
     // rclcpp::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
 
+    // TF2 Listener
     tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock(), tf2::Duration(std::chrono::seconds(30)));
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
 
-    verbose = declare_parameter<bool>("verbose", false);
-
+    // Init state (we need to wait the Occupancy map to initialize the GMRF)
     module_init = false;
 }
+
 
 Cgmrf::~Cgmrf()
 {
 }
+
 
 //--------------------------
 // CALLBACK - OCCUPANCY MAP
@@ -90,22 +84,23 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
         return;
 
     // we can choose to read a map file directly from disk, if we don't want to use the one published by map_server
-    // this is often useful when we need to alter the occupancy map to include outlets, which should be empty for GMRF but which may not be navigable (think windows)
-    std::string mapFilePath = declare_parameter<std::string>("map_file", "");
+    // this is often useful when we need to alter the occupancy map to include outlets, which should be empty for GMRF 
+    // but which may not be navigable (think of windows). Notice that the resolution and origin of the map read from file
+    // should match those of the map topic, thus we copy them below.
     if (mapFilePath != "")
     {
-        RCLCPP_INFO(get_logger(), "Reading map from file '%s'", mapFilePath.c_str());
-        occupancyMap = Utils::parseMapImage(mapFilePath);
-        occupancyMap.header = msg->header;
-        occupancyMap.info = msg->info;
+        RCLCPP_INFO(get_logger(), "[GMRF-node] Reading OccupancyMap from file '%s'", mapFilePath.c_str());
+        occupancyMap = Utils::parseMapImage(mapFilePath);   // just data
+        occupancyMap.header = msg->header;                  // copy header
+        occupancyMap.info = msg->info;                      // copy info (resolution, origin, etc)
     }
     else
     {
         occupancyMap = *msg;
-        RCLCPP_INFO(get_logger(), "Using map from topic '%s'", ocupancyMap_sub->get_topic_name());
+        RCLCPP_INFO(get_logger(), "[GMRF-node] Using OccupancyMap from topic '%s'", ocupancyMap_sub->get_topic_name());
     }
 
-    // publish the actual map we are using, in case it is different from the one published by map_server
+    // Publish the actual map we are using, in case it is different from the one published by map_server
     static rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_republisher =
         create_publisher<nav_msgs::msg::OccupancyGrid>("gmrf_occupancy", rclcpp::QoS(1).transient_local());
 
@@ -114,24 +109,32 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     initialize();
 }
 
+
 void Cgmrf::initialize()
 {
-    // Set GasMap dimensions as the OccupancyMap
-    double map_min_x = occupancyMap.info.origin.position.x;
-    double map_max_x = occupancyMap.info.origin.position.x + occupancyMap.info.width * occupancyMap.info.resolution;
-    double map_min_y = occupancyMap.info.origin.position.y;
-    double map_max_y = occupancyMap.info.origin.position.y + occupancyMap.info.height * occupancyMap.info.resolution;
-
-    // Create GMRF-Map and init
-    my_map = std::make_unique<CGMRF_map>(this, occupancyMap, cell_size, GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation,
-                                         GMRF_lambdaPrior_obstacles, colormap, max_pclpoints_cell, verbose);
-    RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF GridMap initialized");
-
+    // Parse OccupancyGridmap to internal GMRF format
+    TOccupancyMap occMap;
+    occMap.data = occupancyMap.data;
+    occMap.resolution = occupancyMap.info.resolution;      // cell size (m)
+    occMap.width = occupancyMap.info.width;        // number of cells in X direction
+    occMap.height = occupancyMap.info.height;       // number of cells in Y direction
+    occMap.origin_x = occupancyMap.info.origin.position.x;        // world coordinates of the origin of the map
+    occMap.origin_y = occupancyMap.info.origin.position.y;        // world coordinates of the origin of the map
+    
+    // Create the GMRF-Map and initialize its Prior Factors
+    my_map = std::make_unique<CGMRF_map>(occMap, 
+                                        cell_size, 
+                                        GMRF_lambdaPrior_reg, 
+                                        GMRF_lambdaPrior_mass_conservation,
+                                        GMRF_lambdaPrior_obstacles, 
+                                        verbose);
+    RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
 }
 
+
 //----------------------------------
-// CALLBACK - NEW WIND OBSERVATION
+// CALLBACK - NEW SENSOR OBSERVATION
 //----------------------------------
 void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
 {
@@ -148,6 +151,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
         if (reading_speed != 0.0)
         {
             // Transform from anemometer ref_system to the map ref_system using TF
+            // This requires the robot localization (tf tree) to be up to date
             geometry_msgs::msg::PoseStamped anemometer_upWind_pose, map_upWind_pose;
             try
             {
@@ -164,7 +168,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
             }
             catch (tf2::TransformException& ex)
             {
-                RCLCPP_ERROR(get_logger(), "[GMRF] - %s - Error: %s", __FUNCTION__, ex.what());
+                RCLCPP_ERROR(get_logger(), "[GMRF-node] - %s - Error: %s", __FUNCTION__, ex.what());
             }
         }
         else
@@ -174,11 +178,12 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
     }
     catch (std::exception e)
     {
-        RCLCPP_ERROR(get_logger(), "[GMRF] Exception at new Obs: %s ", e.what());
+        RCLCPP_ERROR(get_logger(), "[GMRF-node] Exception at new Obs: %s ", e.what());
     }
     mutex_anemometer.unlock();
     // RCLCPP_INFO(get_logger(), "[GMRF-node] New wind observation! %.2f m/s  %.2f rad (DownWind in the map ref system)",msg->wind_speed,
     // downwind_direction_map);
+
 
     // 2. Get pose of the sensor in the map reference system
     geometry_msgs::msg::TransformStamped transform;
@@ -194,7 +199,7 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
         know_sensor_pose = false;
     }
 
-    // 3. Add observation to the GMRF map
+    // 3. Add observation to the GMRF
     if (module_init)
     {
         // Current sensor pose in the map
@@ -208,12 +213,22 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
     }
 }
 
+
 void Cgmrf::publishMaps()
 {
-    visualization_msgs::msg::MarkerArray wind_array;
-    my_map->get_as_markerArray(wind_array, frame_id);
-    wind_array_pub->publish(wind_array);
+    // TO DO
+    //visualization_msgs::msg::MarkerArray wind_array;
+    //my_map->get_as_markerArray(wind_array, frame_id);
+    //wind_array_pub->publish(wind_array);
 }
+
+
+void Cgmrf::update()
+{
+    // Update GMRF estimation
+     my_map->updateMapEstimation_GMRF(GMRF_lambdaObsLoss);
+}
+
 
 bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res)
 {
@@ -258,27 +273,36 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
     return true;
 }
 
+
 //-----------------------------------------------------------------------------
 //                                    MAIN
 //----------------------------------------------------------------------------
 int main(int argc, char** argv)
 {
+    // Initialize ROS2
     rclcpp::init(argc, argv);
+
+    // Create the GMRF-wind node
     auto my_gmrf_map = std::make_shared<Cgmrf>();
 
+    // Create and Offer the WindEstimation service
     auto service = my_gmrf_map->create_service<WindEstimation>("WindEstimation", std::bind(&Cgmrf::get_wind_value_srv, my_gmrf_map.get(), _1, _2));
-    RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] LOOP....");
+
+    // Main loop
+    RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-wind] MAIN LOOP....");
     rclcpp::Time last_publication_time = my_gmrf_map->now();
     rclcpp::Rate loop_rate(my_gmrf_map->exec_freq);
 
     while (rclcpp::ok())
     {
-        rclcpp::spin_some(my_gmrf_map); // Callbacks & Services
+        rclcpp::spin_some(my_gmrf_map);     // Callbacks & Services
 
         if (my_gmrf_map->module_init)
         {
-            // Update and Publish maps
-            my_gmrf_map->my_map->updateMapEstimation_GMRF(my_gmrf_map->GMRF_lambdaObsLoss);
+            // Update Estimation
+            my_gmrf_map->update();
+           
+            // Publish Map as markers (RVIZ2)
             my_gmrf_map->publishMaps();
 
             // Info about actual rate
@@ -290,8 +314,10 @@ int main(int argc, char** argv)
         else
         {
             if (my_gmrf_map->verbose)
-                RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] Waiting for initialization (Map of environment).");
+                RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] Waiting for initialization (Occupancy map of the environment).");
         }
+
+        // Keep the loop rate
         loop_rate.sleep();
     }
 }

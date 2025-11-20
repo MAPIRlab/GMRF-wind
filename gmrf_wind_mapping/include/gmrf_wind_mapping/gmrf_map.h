@@ -1,19 +1,44 @@
+/*  ================================================================
+    Core implementation of a GMRF (map)
+    GMRF class implements the probability map and methods 
+    for adapting to an occupancy gridmap, insterting new
+    observations and update the map. It also includes methods
+    for visualization and reading the map estimations at specified
+    locations.
+    ================================================================
+*/
 
-#include "rclcpp/rclcpp.hpp"
-#include "visualization_msgs/msg/marker.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
+//#include "rclcpp/rclcpp.hpp"
+//#include "visualization_msgs/msg/marker.hpp"
+//#include "visualization_msgs/msg/marker_array.hpp"
 #include <eigen3/Eigen/Sparse>
 #include <fstream> // std::ofstream
 #include <math.h>  /* atan2 */
-#include <nav_msgs/msg/occupancy_grid.hpp>
+//#include <nav_msgs/msg/occupancy_grid.hpp>
+//#define NUM_CELL_TEMPLATES 200 // For plotting only
 
-#define NUM_CELL_TEMPLATES 200 // For plotting only
+
+// Data structure for each cell in the GMRF
+// Stores mean and standard deviation, as we build a "Gaussian" Random Field
 struct TRandomFieldCell
 {
     double mean;
     double std;
 };
 
+// Data structure to hold the occupancy map to which the GMRF is adapted
+struct TOccupancyMap
+{
+    std::vector<int8_t> data;
+    double resolution;      // cell size (m)
+    size_t width;        // number of cells in X direction
+    size_t height;       // number of cells in Y direction
+    // Real-world pose of the cell (0,0) in the map ref system
+    double origin_x;        // world coordinates of the origin of the map
+    double origin_y;        // world coordinates of the origin of the map
+};
+
+// Data structure to return wind vector estimations
 struct WindVector
 {
     double module;
@@ -28,23 +53,29 @@ struct WindVector
     }
 };
 
-/** GMRF class implementing the probability map and methods for insterting new observations and update the map */
+
+
 class CGMRF_map
 {
 public:
-    CGMRF_map(rclcpp::Node* _node, const nav_msgs::msg::OccupancyGrid& oc_map, float cell_size, double m_lambdaPrior_reg,
-              double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles, std::string m_colormap, int max_points_cell, bool verbose);
+    // Create GMRF from an occupancy gridmap
+    // And sets the prior weights for the different factors
+    CGMRF_map(  const TOccupancyMap& oc_map, 
+                float cell_size,
+                double m_lambdaPrior_reg,
+                double m_lambdaPrior_mass_conservation, 
+                double m_lambdaPrior_obstacles,
+                bool verbose
+            );
     ~CGMRF_map();
 
-    // insert new observation
+    // Insert new observation
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
 
-    // solves the minimum quadratic system to determine the new concentration of each cell
+    // Solves the Least Squaares linear system to determine the new values at each cell
     void updateMapEstimation_GMRF(float lambdaObsLoss);
 
-    // Visualization
-    void get_as_markerArray(visualization_msgs::msg::MarkerArray& ma, std::string frame_id);
-
+    // Read estimation
     WindVector getEstimation(int index);
     WindVector getEstimation(double x, double y);
 
@@ -54,23 +85,25 @@ public:
     }
 
 protected:
-    rclcpp::Node* node;
     std::vector<TRandomFieldCell> m_map;      // GMRF container of nodes
-    nav_msgs::msg::OccupancyGrid m_Ocgridmap; // Occupancy gridmap of the environment
+    TOccupancyMap m_Ocgridmap;                // Occupancy gridmap of the environment
     float m_x_min, m_x_max, m_y_min, m_y_max; // dimensions (m)
     float m_resolution;                       // cell_size (m)
     size_t m_size_x, m_size_y;                // dimensions in CellNumber
     size_t N;                                 // number of cells in the GMRF (we have 2N nodes)
-    float res_coef;
     bool verbose;
 
     // GMRF
-    size_t nPriorFactors;                 // Static/fixed factors
-    size_t nObsFactors;                   // Dynamic factors due to observations
+    size_t nPriorFactors;                 // Static factors (dont change over time)
+    size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
     double lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
     double lambdaPrior_mass_conservation; // Weight for mass conservation law prior
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    // SQRT values (to build J matrix without the Lambda diagonal matrix)
+    double lambdaPrior_reg_sqrt;               // Weight for regularization prior -> neighbour cells have similar wind vectors
+    double lambdaPrior_mass_conservation_sqrt; // Weight for mass conservation law prior
+    double lambdaPrior_obstacles_sqrt;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
 
     struct TobservationGMRF
     {
@@ -81,34 +114,20 @@ protected:
         bool time_invariant; // if the observation will lose weight (lambda) as time goes on (default false)
     };
 
-    // GMRF structures
-    std::vector<Eigen::Triplet<double>> J;      // the Jacobian
-    std::vector<Eigen::Triplet<double>> Lambda; // the information matrix (weights)
-    std::vector<TobservationGMRF> activeObs;    // Vector with the active observations and their respective Information
+    // GMRF Matrices and Structures
+    std::vector<Eigen::Triplet<double>> J;          // Jacobian
+    //std::vector<Eigen::Triplet<double>> Lambda;   // the information matrix (weights)
+    std::vector<TobservationGMRF> activeObs;        // Vector with the active observations and their respective Information
 
-    // functions
+    // Util Functions
     bool is_cell_free(size_t id_gmrf);
     bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
 
     int xy2idx(float x, float y) const;
-
     void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);
     void id2xy(size_t id, double& x, double& y);
 
     // Visualization
     void save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout, std::vector<Eigen::Triplet<double>>& Aout, Eigen::VectorXd& yout);
     void save_grmf_factor_graph(Eigen::SparseMatrix<double>& H, Eigen::VectorXd& G);
-    visualization_msgs::msg::Marker line_list, line_list_obs;
-    void init_colormaps(std::string colormap);
-    float color_r[200];
-    float color_g[200];
-    float color_b[200];
-
-    // pcl::PointCloud<pcl::PointXYZRGB> template_cells[NUM_CELL_TEMPLATES];
-    // void init_pcl_templates(std::string colormap, int max_points_cell);
-
-    // float                                   GMRF_lambdaPrior;		//!< The information (Lambda) of fixed map constraints
-    // std::vector<Eigen::Triplet<double> >    H_prior;        // the prior part of H
-    // Eigen::VectorXd                         g;              // Gradient vector
-    // std::multimap<size_t,size_t>            cell_interconnections;		//Store the interconnections (relations) of each cell with its neighbourds
 };
