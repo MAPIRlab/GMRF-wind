@@ -7,16 +7,9 @@
     locations.
     ================================================================
 */
-
-//#include "rclcpp/rclcpp.hpp"
-//#include "visualization_msgs/msg/marker.hpp"
-//#include "visualization_msgs/msg/marker_array.hpp"
 #include <eigen3/Eigen/Sparse>
 #include <fstream> // std::ofstream
 #include <math.h>  /* atan2 */
-//#include <nav_msgs/msg/occupancy_grid.hpp>
-//#define NUM_CELL_TEMPLATES 200 // For plotting only
-
 
 // Data structure for each cell in the GMRF
 // Stores mean and standard deviation, as we build a "Gaussian" Random Field

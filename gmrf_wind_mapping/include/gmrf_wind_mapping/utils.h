@@ -9,6 +9,7 @@
 namespace Utils
 {
 
+    // Get yaw from a quaternion
     inline double getYaw(const geometry_msgs::msg::Quaternion& quat)
     {
         tf2::Quaternion tfquat;
@@ -20,11 +21,15 @@ namespace Utils
         return yaw;
     }
 
+
+    // Create a quaternion message from a yaw angle
     inline geometry_msgs::msg::Quaternion createQuaternionMsgFromYaw(double yaw)
     {
         return tf2::toMsg(tf2::Quaternion(tf2::Vector3(0, 0, 1), yaw));
     }
 
+    
+    // Parse a grayscale image as an occupancy gridmap
     inline nav_msgs::msg::OccupancyGrid parseMapImage(const std::string& path)
     {
         if (!std::filesystem::exists(path))

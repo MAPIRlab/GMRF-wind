@@ -2,7 +2,6 @@
 #include <cstdio>   // Necesario para fprintf
 #include <iostream>
 #include <iomanip>  // Necesario para std::setprecision
-//#include "gmrf_wind_mapping/utils.h"
 
 /*---------------------------------------------------------------
                         Constructor
