@@ -72,9 +72,19 @@ public:
     WindVector getEstimation(int index);
     WindVector getEstimation(double x, double y);
 
+    // Public accessor to get cell center coordinates (x,y) in meters from cell index
+    // This forwards to the internal id2xy() utility and is provided for visualization
+    // helpers that need world coordinates for each GMRF cell.
+    void id2xy_public(size_t id, double& x, double& y);
+
     Eigen::Vector2i map_size()
     {
         return {m_size_x, m_size_y};
+    }
+
+    float map_resolution()
+    {
+        return m_resolution;
     }
 
 protected:

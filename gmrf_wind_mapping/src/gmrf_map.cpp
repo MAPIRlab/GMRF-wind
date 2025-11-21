@@ -872,3 +872,9 @@ int CGMRF_map::xy2idx(float x, float y) const
     int y_idx = static_cast<int>((y - m_y_min) / m_resolution);
     return x_idx + y_idx * m_size_x;
 }
+
+// Public wrapper to expose cell center coordinates for visualization utilities
+void CGMRF_map::id2xy_public(size_t id, double& x, double& y)
+{
+    id2xy(id, x, y);
+}
