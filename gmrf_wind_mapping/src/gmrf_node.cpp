@@ -40,7 +40,9 @@ Cgmrf::Cgmrf()
     exec_freq = declare_parameter<double>("exec_freq", 2.0);
     cell_size = declare_parameter<double>("cell_size", 0.5);
     verbose = declare_parameter<bool>("verbose", false);
-    // Lamnda/weights for the different priors and observation factors
+    visualize_gmrf = declare_parameter<bool>("visualize_gmrf", true);
+
+    // Lambda/weights for the different priors and observation factors
     GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1);
     GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10);
@@ -130,6 +132,11 @@ void Cgmrf::initialize()
                                         verbose);
     RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
+
+    // DEBUG - ADD SOME RANDOM OBSERVATIONS
+    //      insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs)
+    //my_map->insertObservation_GMRF(12.0, 3.14, 1.15, 1.8, 100.0);
+    //my_map->insertObservation_GMRF(12.0, 3.14, 1.15, 3.0, 100.0);
 }
 
 
@@ -216,10 +223,12 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
 
 void Cgmrf::publishMaps()
 {
-    // TO DO
-    //visualization_msgs::msg::MarkerArray wind_array;
-    //my_map->get_as_markerArray(wind_array, frame_id);
-    //wind_array_pub->publish(wind_array);
+    if (!visualize_gmrf)
+        return;
+    
+    visualization_msgs::msg::MarkerArray wind_array;
+    Utils::createWindMarkerArrayFromGMRF(*my_map, frame_id, wind_array);
+    wind_array_pub->publish(wind_array);
 }
 
 
@@ -273,6 +282,23 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
     return true;
 }
 
+bool Cgmrf::add_wind_observation_srv(AddWindObservation::Request::SharedPtr req, AddWindObservation::Response::SharedPtr res)
+{
+    if (!module_init)
+    {
+        RCLCPP_ERROR(get_logger(), "Trying to add GMRF wind observation, but it is not initialized yet (probably has not received the occupancy map)");
+        return false;
+    }
+
+    for (int i = 0; i < req->wind_speed.size(); i++)
+    {
+        my_map->insertObservation_GMRF(req->wind_speed[i], req->wind_direction[i], req->x_pos[i], req->y_pos[i], GMRF_lambdaObs);
+        if (verbose)
+            RCLCPP_INFO(get_logger(), "[GMRF-node] New wind observation added via service at (%.2f, %.2f): %.2f m/s, %.2f rad", req->x_pos[i], req->y_pos[i], req->wind_speed[i], req->wind_direction[i]);
+    }
+    return true;
+}
+
 
 //-----------------------------------------------------------------------------
 //                                    MAIN
@@ -284,6 +310,9 @@ int main(int argc, char** argv)
 
     // Create the GMRF-wind node
     auto my_gmrf_map = std::make_shared<Cgmrf>();
+
+    // Create and Offer the AddWindObservation service
+    auto add_wind_observation_service = my_gmrf_map->create_service<AddWindObservation>("AddWindObservation", std::bind(&Cgmrf::add_wind_observation_srv, my_gmrf_map.get(), _1, _2));
 
     // Create and Offer the WindEstimation service
     auto service = my_gmrf_map->create_service<WindEstimation>("WindEstimation", std::bind(&Cgmrf::get_wind_value_srv, my_gmrf_map.get(), _1, _2));

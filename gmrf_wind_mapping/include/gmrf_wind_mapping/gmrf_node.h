@@ -26,10 +26,9 @@
 
 // Services
 #include "gmrf_msgs/srv/wind_estimation.hpp"
-
-
+#include "gmrf_msgs/srv/add_wind_observation.hpp"
 using WindEstimation = gmrf_msgs::srv::WindEstimation;
-
+using AddWindObservation = gmrf_msgs::srv::AddWindObservation;
 
 // Cgmrf class (ROS2 Node)
 class Cgmrf : public rclcpp::Node
@@ -40,10 +39,11 @@ public:
     void update();
     void publishMaps();
     bool get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstimation::Response::SharedPtr res);
+    bool add_wind_observation_srv(AddWindObservation::Request::SharedPtr req, AddWindObservation::Response::SharedPtr res);
     double exec_freq;
     bool module_init;
     bool verbose;
-
+    bool visualize_gmrf;
 protected:
     void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
