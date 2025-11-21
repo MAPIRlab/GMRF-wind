@@ -1,6 +1,6 @@
 image: demo_map.pgm
 mode: trinary
-resolution: 0.01
+resolution: 0.01  # meters per pixel
 origin: [0, 0, 0]
 negate: 0
 occupied_thresh: 0.0
