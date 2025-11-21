@@ -136,7 +136,7 @@ namespace Utils
             WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction;
             Eigen::Vector2d vec = w.asEigen();                              //vec.x(); vec.y()
 
-            if (w.module < 0.001 || max_module < 0.001)
+            if (w.module < 0.01 || max_module < 0.01)
                 continue;   // skip near-zero vectors
 
             // Cell center coordinates
