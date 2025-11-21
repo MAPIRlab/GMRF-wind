@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <tf2/time.h>
+#include <yaml-cpp/yaml.h>
 
 using namespace std::placeholders;
 
@@ -35,7 +36,7 @@ Cgmrf::Cgmrf()
     //------------------
     frame_id = declare_parameter<std::string>("frame_id", "map");
     sensor_topic = declare_parameter<std::string>("sensor_topic", "/anemometer");
-    mapFilePath = declare_parameter<std::string>("map_file", "");
+    mapFilePath = declare_parameter<std::string>("map_yaml_file", "");
     map_topic = declare_parameter<std::string>("map_topic", "map");
     exec_freq = declare_parameter<double>("exec_freq", 2.0);
     cell_size = declare_parameter<double>("cell_size", 0.5);
@@ -43,32 +44,37 @@ Cgmrf::Cgmrf()
     visualize_gmrf = declare_parameter<bool>("visualize_gmrf", true);
 
     // Lambda/weights for the different priors and observation factors
-    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1);
-    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 10000);
-    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10);
-    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 10.0);
+    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
+    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 1.0);
+    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
+    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 1.0);
     GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
     
     // Subscriptions
     //----------------------------------
     sub_sensor = create_subscription<olfaction_msgs::msg::Anemometer>(sensor_topic, 10, std::bind(&Cgmrf::sensorCallback, this, _1));
-    ocupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(
-        map_topic, rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
+    if (mapFilePath == "")
+    {
+        // Subscribe to MapServer topic only if we don't read a map from file
+        occupancyMap_sub = create_subscription<nav_msgs::msg::OccupancyGrid>(map_topic, rclcpp::QoS(1).transient_local().reliable(), std::bind(&Cgmrf::mapCallback, this, _1));
         
+        // Init state (we need to wait the Occupancy map to initialize the GMRF)
+        module_init = false;
+    }
+    else
+    {
+        // Read map from file and Initialize GMRF
+        ReadMap();
+        initialize();
+    }
+
     // Publishers
     //----------------------------------
     wind_array_pub = create_publisher<visualization_msgs::msg::MarkerArray>("wind_array_pub", 1);
-    
-    // Services
-    //----------------------------------
-    // rclcpp::ServiceServer service = param_n.advertiseService("suggestNextObservationLocation", suggestNextObservationLocation);
-
+        
     // TF2 Listener
     tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock(), tf2::Duration(std::chrono::seconds(30)));
     tf_listener = std::make_shared<tf2_ros::TransformListener>(*tf_buffer);
-
-    // Init state (we need to wait the Occupancy map to initialize the GMRF)
-    module_init = false;
 }
 
 
@@ -85,31 +91,75 @@ void Cgmrf::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     if (module_init)
         return;
 
-    // we can choose to read a map file directly from disk, if we don't want to use the one published by map_server
-    // this is often useful when we need to alter the occupancy map to include outlets, which should be empty for GMRF 
-    // but which may not be navigable (think of windows). Notice that the resolution and origin of the map read from file
-    // should match those of the map topic, thus we copy them below.
-    if (mapFilePath != "")
-    {
-        RCLCPP_INFO(get_logger(), "[GMRF-node] Reading OccupancyMap from file '%s'", mapFilePath.c_str());
-        occupancyMap = Utils::parseMapImage(mapFilePath);   // just data
-        occupancyMap.header = msg->header;                  // copy header
-        occupancyMap.info = msg->info;                      // copy info (resolution, origin, etc)
-    }
-    else
-    {
-        occupancyMap = *msg;
-        RCLCPP_INFO(get_logger(), "[GMRF-node] Using OccupancyMap from topic '%s'", ocupancyMap_sub->get_topic_name());
-    }
-
-    // Publish the actual map we are using, in case it is different from the one published by map_server
-    static rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_republisher =
-        create_publisher<nav_msgs::msg::OccupancyGrid>("gmrf_occupancy", rclcpp::QoS(1).transient_local());
-
-    map_republisher->publish(occupancyMap);
+    occupancyMap = *msg;
+    RCLCPP_INFO(get_logger(), "[GMRF-node] Using OccupancyMap from topic '%s'", occupancyMap_sub->get_topic_name());
 
     initialize();
 }
+
+// Read Occupancy GridMap from a YAML file
+inline void Cgmrf::ReadMap()
+{
+    // we can choose to read a map file directly from disk, if we don't want to use the one published by map_server
+    // this is often useful when we need to alter the occupancy map to include inlets/outlets, which should be non-occupied
+    // for GMRF but which may not be navigable (think of windows). 
+    try
+    {
+        // Load YAML file
+        YAML::Node yaml = YAML::LoadFile(mapFilePath);
+
+        // if the image path is relative interpret it as relative to the YAML, not the working directory
+        std::filesystem::path imagePath(yaml["image"].as<std::string>());
+        if (imagePath.is_relative())
+            imagePath = std::filesystem::path(mapFilePath).parent_path() / imagePath;
+
+        // Load Data
+        //-----------------------
+        cv::Mat mapImage = cv::imread(imagePath, cv::IMREAD_GRAYSCALE);
+        size_t width = mapImage.size().width;
+        size_t height = mapImage.size().height;
+        occupancyMap.data.resize(width * height);
+
+        double free_thresh = 1 - yaml["free_thresh"].as<double>(); // Unused, this is for trinary maps. We only consider cells free or occupied, not "unknown"
+        double occupied_thresh = 1 - yaml["occupied_thresh"].as<double>();
+
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                double value = mapImage.at<uint8_t>(y, x) / 255.;
+                int8_t& occupancy = occupancyMap.data.at(width * (height - y - 1) + x);
+                if (value > free_thresh)
+                    occupancy = 0;
+                else if (value < occupied_thresh)
+                    occupancy = 100;
+                else
+                    occupancy = -1;
+            }
+
+        // Metadata
+        //-------------------
+        occupancyMap.header.frame_id = "map";
+        occupancyMap.info.map_load_time = now();
+        occupancyMap.info.resolution = yaml["resolution"].as<double>();
+        auto origin_array = yaml["origin"].as<std::array<double, 3>>();
+        occupancyMap.info.origin.position.x = origin_array[0];
+        occupancyMap.info.origin.position.y = origin_array[1];
+        occupancyMap.info.origin.orientation = Utils::createQuaternionMsgFromYaw(origin_array[2]);
+
+        occupancyMap.info.height = height;
+        occupancyMap.info.width = width;
+
+        // Publish the actual map we are using, in case it is different from the one published by map_server
+        static rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_republisher =
+        create_publisher<nav_msgs::msg::OccupancyGrid>("gmrf_occupancy", rclcpp::QoS(1).transient_local());
+        map_republisher->publish(occupancyMap);
+    }   
+    catch (const std::exception& e)
+    {
+        RCLCPP_ERROR(get_logger(), "Exception caught: '%s'", e.what());
+    }
+}
+
 
 
 void Cgmrf::initialize()

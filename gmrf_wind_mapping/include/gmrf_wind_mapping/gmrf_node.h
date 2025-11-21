@@ -47,11 +47,12 @@ public:
 protected:
     void sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg);
     void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+    inline void ReadMap();
     void initialize();
 
     // Subscriptions & Publishers
     rclcpp::Subscription<olfaction_msgs::msg::Anemometer>::SharedPtr sub_sensor;
-    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr ocupancyMap_sub;
+    rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancyMap_sub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
 
     // GMRF Maps

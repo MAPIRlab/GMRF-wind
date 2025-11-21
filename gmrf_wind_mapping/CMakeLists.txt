@@ -21,6 +21,7 @@ find_package(olfaction_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED) 
 find_package(gmrf_msgs REQUIRED) 
 find_package(OpenCV REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 
 FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
@@ -41,7 +42,7 @@ install(DIRECTORY
 # BUILDING
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
 target_include_directories(gmrf_wind_mapping_node PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS})
+target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS} yaml-cpp)
 
 
 ament_target_dependencies(gmrf_wind_mapping_node

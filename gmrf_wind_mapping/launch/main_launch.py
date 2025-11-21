@@ -34,7 +34,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             {"frame_id": "map"},                              # Frame where to plot the map, usually (map)
             {"sensor_topic": "/anemometer"},                  # Topic where the anemometer measurements are published
-            {"map_file": ""},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            {"map_yaml_file": os.path.join(pkg_dir, "launch", "demo_map.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
             {"map_topic": "map"},                             # Topic where the Occupancy GridMap is published
             {"exec_freq": 10.0},                              # Frequency (Hz) to execute the GMRF update step
             {"cell_size": 0.25},                              # Size of each cell in the GMRF grid (meters)
