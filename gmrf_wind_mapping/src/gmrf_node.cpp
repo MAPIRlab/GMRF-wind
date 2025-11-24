@@ -179,7 +179,9 @@ void Cgmrf::initialize()
                                         GMRF_lambdaPrior_reg, 
                                         GMRF_lambdaPrior_mass_conservation,
                                         GMRF_lambdaPrior_obstacles, 
-                                        verbose);
+                                        verbose,
+                                        true // estimateTiming
+                                        );
     RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
 

@@ -10,6 +10,8 @@
 #include <eigen3/Eigen/Sparse>
 #include <fstream> // std::ofstream
 #include <math.h>  /* atan2 */
+#include <numeric> // std::accumulate
+#include <chrono>   // Needed for time measurements
 
 // Data structure for each cell in the GMRF
 // Stores mean and standard deviation, as we build a "Gaussian" Random Field
@@ -46,6 +48,31 @@ struct WindVector
     }
 };
 
+// Struct to hold timing data
+struct TimeStats {
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
+    std::vector<long long> timings_ms;
+
+    void start() {
+        start_time = std::chrono::high_resolution_clock::now();
+    }
+
+    void stop() {
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        timings_ms.push_back(duration.count());
+    }
+
+    double getMeanTimeMs() const {
+        if (timings_ms.empty()) {
+            return 0.0;
+        }
+        // Accumulate
+        long long sum_ms = std::accumulate(timings_ms.begin(), timings_ms.end(), 0LL);
+        return static_cast<double>(sum_ms) / timings_ms.size();
+    }
+};
+
 
 
 class CGMRF_map
@@ -58,15 +85,17 @@ public:
                 double m_lambdaPrior_reg,
                 double m_lambdaPrior_mass_conservation, 
                 double m_lambdaPrior_obstacles,
-                bool verbose
+                bool verbose,
+                bool estimateTiming
             );
     ~CGMRF_map();
 
     // Insert new observation
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
 
-    // Solves the Least Squaares linear system to determine the new values at each cell
+    // Solves the Least Squares linear system to determine the new values at each cell
     void updateMapEstimation_GMRF(float lambdaObsLoss);
+    void computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hsparse);
 
     // Read estimation
     WindVector getEstimation(int index);
@@ -95,6 +124,11 @@ protected:
     size_t m_size_x, m_size_y;                // dimensions in CellNumber
     size_t N;                                 // number of cells in the GMRF (we have 2N nodes)
     bool verbose;
+
+    // Time Stats
+    bool estimateTiming;
+    TimeStats meanTimer;
+    TimeStats stdTimer;
 
     // GMRF
     size_t nPriorFactors;                 // Static factors (dont change over time)

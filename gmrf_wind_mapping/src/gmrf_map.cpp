@@ -10,10 +10,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                      float cell_size, 
                      double m_lambdaPrior_reg,
                      double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles,
-                     bool verbose)
+                     bool verbose,
+                     bool estimateTiming=false)
 {
     // Set Verbose level
     this->verbose = verbose;
+    this->estimateTiming = estimateTiming;
 
     try
     {
@@ -48,7 +50,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
 
         // 1. INIT RANDOM FIELD AND CREATE CONNEXIONS BETWEEN NODES
         //-----------------------------------------------------------
-        std::cout << "[GMRF_MAP] Generating GMRF for 2D WIND estimation..." << std::endl;
+        std::cerr << "[GMRF_MAP] Generating GMRF for 2D WIND estimation..." << std::endl;
 
         // 1. Init the map container (2N cells)
         //-------------------------
@@ -59,14 +61,14 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
 
         if (verbose)
         {
-            std::cout << "--------------------------------" << std::endl;
-            std::cout << "[CGMRF] GMRF created:" << std::endl;
-            std::cout << "[CGMRF] Using OccupancyGrid with limits: x=(" << x_min << "," << x_max << ") [m] and y=(" << y_min << "," << y_max << std::endl;
-            std::cout << "[CGMRF] Using OccupancyGrid with cell size: (" << m_Ocgridmap.width << "," << m_Ocgridmap.height << ") cells with cell_size " << std::fixed << std::setprecision(2) << m_Ocgridmap.resolution << "[m]" << std::endl;
-            std::cout << "[CGMRF] GMRF limits: x=(" << std::fixed << std::setprecision(2) << m_x_min << "," << m_x_max << ")[m] y=(" << m_y_min << "," << m_y_max << ")[m]" << std::endl;
-            std::cout << "[CGMRF] GMRF cell size: (" << m_size_x << "," << m_size_y << ") cells with cell_size " << std::fixed << std::setprecision(2) << m_resolution << "[m]" << std::endl;
-            std::cout << "[CGMRF] GMRF with " << N << " cells and " << m_map.size() << " nodes" << std::endl;
-            std::cout <<  "--------------------------------" << std::endl;
+            std::cerr << "--------------------------------" << std::endl;
+            std::cerr << "[CGMRF] GMRF created:" << std::endl;
+            std::cerr << "[CGMRF] Using OccupancyGrid with limits: x=(" << x_min << "," << x_max << ") [m] and y=(" << y_min << "," << y_max << std::endl;
+            std::cerr << "[CGMRF] Using OccupancyGrid with cell size: (" << m_Ocgridmap.width << "," << m_Ocgridmap.height << ") cells with cell_size " << std::fixed << std::setprecision(2) << m_Ocgridmap.resolution << "[m]" << std::endl;
+            std::cerr << "[CGMRF] GMRF limits: x=(" << std::fixed << std::setprecision(2) << m_x_min << "," << m_x_max << ")[m] y=(" << m_y_min << "," << m_y_max << ")[m]" << std::endl;
+            std::cerr << "[CGMRF] GMRF cell size: (" << m_size_x << "," << m_size_y << ") cells with cell_size " << std::fixed << std::setprecision(2) << m_resolution << "[m]" << std::endl;
+            std::cerr << "[CGMRF] GMRF with " << N << " cells and " << m_map.size() << " nodes" << std::endl;
+            std::cerr <<  "--------------------------------" << std::endl;
         }
 
         // 2. Memory Reservation (seepUp)
@@ -76,7 +78,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nObsFactors = 0;
         nFactors = nPriorFactors + nObsFactors;
         if (verbose)
-            std::cout <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
+            std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
 
         // Reserve memory for the Jacobian
         // In this implementation we fuse the Information Matrix Within the Jacobian
@@ -336,7 +338,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nPriorFactors = count;
         nFactors = nPriorFactors + nObsFactors;
         activeObs.clear();
-        std::cout <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
+        std::cerr <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
 
         
         // DEBUG: Save to file
@@ -357,16 +359,16 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         new_obs.windY = 1.0;
         new_obs.lambda = 13;
         new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-        std::cout <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
+        std::cerr <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
         activeObs.push_back(new_obs);
         nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
         */
     }
     catch (std::exception e)
     {
-        std::cout << "=============================================================" << std::endl;
-        std::cout << "[GMRF-Constructor] EXCEPTION: " << e.what() << std::endl;
-        std::cout << "=============================================================" << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-Constructor] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
     }
 }
 
@@ -427,20 +429,20 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
         // Check occupancy
         if (m_Ocgridmap.data[id_oc] >= 50.0)
         {
-            // std::cout <<  "[GMRF] OCCUPIED %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
+            // std::cerr <<  "[GMRF] OCCUPIED %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return false;
         }
         else
         {
-            // std::cout <<  "[GMRF] FREE %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
+            // std::cerr <<  "[GMRF] FREE %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return true;
         }
     }
     catch (std::exception e)
     {
-        std::cout << "=============================================================" << std::endl;
-        std::cout << "[GMRF-is_cell_free] EXCEPTION: " << e.what() << std::endl;
-        std::cout << "=============================================================" << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-is_cell_free] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
         return false;
     }
 }
@@ -500,9 +502,9 @@ bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2
     }
     catch (std::exception e)
     {
-        std::cout << "=============================================================" << std::endl;
-        std::cout << "[GMRF-check_connectivity_between2cells] EXCEPTION: " << e.what() << std::endl;
-        std::cout << "=============================================================" << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-check_connectivity_between2cells] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
         return false;
     }
 }
@@ -519,7 +521,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         {
             if(observation.cell_idx <0 || observation.cell_idx > N)
             {
-                std::cout << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
+                std::cerr << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
                 return;
             }
             activeObs.push_back(observation);
@@ -540,7 +542,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         new_obs.lambda = lambdaObs;
         new_obs.time_invariant = true; // Default behaviour, the obs will not lose weight with time.
         if (verbose)
-            std::cout << "[GMRF-MAP] New obs: Wx = " << new_obs.windX << " m/s Wy = " << new_obs.windY << " m/s" << std::endl;
+            std::cerr << "[GMRF-MAP] New obs: Wx = " << new_obs.windX << " m/s Wy = " << new_obs.windY << " m/s" << std::endl;
 
         // Add Observation to GMRF
         add_obs(new_obs);
@@ -568,9 +570,9 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     }
     catch (std::exception e)
     {
-        std::cout << "=============================================================" << std::endl;
-        std::cout << "[GMRF-insertObservation_GMRF] EXCEPTION: " << e.what() << std::endl;
-        std::cout << "=============================================================" << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-insertObservation_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
     }
 }
 
@@ -583,25 +585,27 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
     try
     {
         /*
-         * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
-         *              J is size (nFactors x NumNodes)
-         *
-         * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
-         *              Lambda is size (nFactors x nFactors). In this implementation, we fuse it within J
-         *
-         * Y (vector of observations) contains the values of observations, 0 for prior factors
-         *              y is size (nFactors x 1)
-         *
-         * R (Residuals) Since our system is deterministic, the residuals do not
-         *              need to be re-evaluated on each iteration (we only perform 1 iteration).
-         *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
-         *
-         * H (Hessian) = J' * Lambda * J
-         *               H is size (NumNodes x NumNodes)
-         *
-         * G (gradient) = J' * Lambda * R
-         *               g is size (NumNodes x 1)
-         */
+        * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
+        *              J is size (nFactors x NumNodes)
+        *
+        * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
+        *              Lambda is size (nFactors x nFactors). In this implementation, we fuse it within J
+        *
+        * Y (vector of observations) contains the values of observations, 0 for prior factors
+        *              y is size (nFactors x 1)
+        *
+        * R (Residuals) Since our system is deterministic, the residuals do not
+        *              need to be re-evaluated on each iteration (we only perform 1 iteration).
+        *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
+        *
+        * H (Hessian) = J' * Lambda * J
+        *               H is size (NumNodes x NumNodes)
+        *
+        * G (gradient) = J' * Lambda * R
+        *               g is size (NumNodes x 1)
+        */
+        
+        if (estimateTiming) meanTimer.start();
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
@@ -648,28 +652,28 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         Eigen::SparseMatrix<double> Jsparse(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
         if (verbose)
-            std::cout <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
+            std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> JsparseT; // size(2*N,nFactors);
         JsparseT = Eigen::SparseMatrix<double>(Jsparse.transpose());
         if (verbose)
-            std::cout <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
+            std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
         //Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
         //Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
         //if (verbose)
-        //    std::cout <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
+        //    std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
 
         Eigen::SparseMatrix<double> Hsparse; // size(2*N,2*N);
         //Hsparse = JsparseT * Asparse * Jsparse;
         Hsparse = JsparseT * Jsparse;   // Since we fused Lambda into J
         if (verbose)
-            std::cout <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
+            std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
         //Eigen::VectorXd G = JsparseT * Asparse * y_temp;
         Eigen::VectorXd G = JsparseT * y_temp; // Since we fused Lambda into J
         if (verbose)
-            std::cout <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
+            std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
         // DEBUG - Save to file
         // save_grmf_factor_graph(Hsparse, G);
 
@@ -680,11 +684,17 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         // We need to solve: H * m = G
         // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
         Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;
-        solver.compute(Hsparse);
+        solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
         Eigen::VectorXd m_MAP_sol = solver.solve(G);
 
+        if (estimateTiming){
+            meanTimer.stop(); // Stop Timer for Mean computation
+            auto mean_time_ms = meanTimer.getMeanTimeMs();
+            std::cerr << "[GMRF] Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
+        }
+
         if (verbose)
-            std::cout <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
+            std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
         
         // DEBUG - Save to file
         //std::ofstream file("~/gmrf_solution.txt");
@@ -700,6 +710,15 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         {
             m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
             m_map[j].std = 0.0;             // Not estimated yet. We need inv(H) diagonal for that.
+        }
+
+        // Uncertainty estimation
+        if (estimateTiming) stdTimer.start(); // Start Timer for Uncertainty computation        
+        computeUncertainty_GMRF(Hsparse);
+        if (estimateTiming){
+            stdTimer.stop(); // Stop Timer for Uncertainty computation
+            auto std_time_ms = stdTimer.getMeanTimeMs();
+            std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
         }
 
         // 6. Update Information/Strength of Active Observations
@@ -722,13 +741,80 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
                 ++ito;
         }
         if (verbose)
-            std::cout <<  "[GMRF] "<< nObsFactors << " ObservationFactors are active" << std::endl;
+            std::cerr <<  "[GMRF] "<< nObsFactors << " ObservationFactors are active" << std::endl;
     }
     catch (std::exception e)
     {
-        std::cout << "=============================================================" << std::endl;
-        std::cout << "[GMRF-updateMapEstimation_GMRF] EXCEPTION: " << e.what() << std::endl;
-        std::cout << "=============================================================" << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-updateMapEstimation_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+    }
+}
+
+
+void CGMRF_map::computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hsparse)
+{
+    // The Hessian H is the Information Matrix (Lambda) for the MAP estimate. Here, H size is (2*N,2*N)
+    // The Covariance Matrix C is the inverse of the Hessian: C = H^{-1}.
+    // The uncertainties (variances) are the diagonal elements of C.
+
+    try
+    {
+        size_t matrix_size = Hsparse.rows();
+        if (Hsparse.cols() != matrix_size || matrix_size == 0)
+        {
+            std::cerr << "[GMRF-computeUncertainty_GMRF] Error: Hsparse is not a square matrix or is empty." << std::endl;
+            return;
+        }
+
+        if (verbose)
+             std::cerr << "[GMRF] Computing uncertainty for matrix H of size (" << matrix_size << "," << matrix_size << ")..." << std::endl;
+
+        // Use the same SimplicialLLT solver used for the mean computation.
+        Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;
+        solver.compute(Hsparse);
+
+        if (solver.info() != Eigen::Success)
+        {
+            // Failed to factorize the matrix. The system might be ill-conditioned or singular.
+            std::cerr << "[GMRF-computeUncertainty_GMRF] Error: Failed to compute Cholesky factorization of Hsparse. Cannot compute uncertainty." << std::endl;
+            return;
+        }
+
+        // --- ITERATIVE METHOD ---
+        // Not ideal, but... better than nothing
+        // Vector for the right-hand side (RHS) of H * x_j = e_j
+        Eigen::VectorXd e_j = Eigen::VectorXd::Zero(matrix_size);
+
+        // 2. Loop through all state variables to solve H * x_j = e_j for each
+        for (size_t j = 0; j < matrix_size; ++j)
+        {
+            // Set e_j to be the j-th standard basis vector (1 at j, 0 elsewhere)
+            e_j.setZero();
+            e_j(j) = 1.0;
+
+            // Solve H * x_j = e_j. The j-th component of the solution x_j is the variance: (H^-1)_{j,j}.
+            Eigen::VectorXd x_j = solver.solve(e_j);
+            
+            double variance = x_j(j);
+            
+            // 3. Update the standard deviation (uncertainty) in the map state
+            if (variance > 0.0) {
+                m_map[j].std = std::sqrt(variance); 
+            } else {
+                // Should not happen for a positive definite matrix, but handles numerical safety
+                m_map[j].std = 0.0;
+            }
+        }
+        
+        if (verbose)
+             std::cerr << "[GMRF] Uncertainty computation complete." << std::endl;
+    }
+    catch (std::exception& e)
+    {
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-computeUncertainty_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
     }
 }
 
@@ -762,7 +848,7 @@ void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout
 
         // define the format you want, you only need one instance of this...
         const static Eigen::IOFormat CSVFormat(Eigen::StreamPrecision, Eigen::DontAlignCols, ", ", "\n");
-        // std::cout <<  "[GMRF] Saving Factor-Graph to file...");
+        // std::cerr <<  "[GMRF] Saving Factor-Graph to file...");
         std::ofstream file("~/gmrf_jacobian_dense.txt");
         if (file.is_open())
         {
@@ -784,8 +870,8 @@ void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout
 
     if (save_sparse)
     {
-        std::cout <<  "[GMRF] Saving Factor-Graph (list of triplets) to file..." << std::endl;
-        std::cout <<  "[GMRF] Jtriplets(" << Jout.size() << ",3), Atriplets(" << Aout.size() << ",3), numFactors(" << yout.rows() << ")" << std::endl;
+        std::cerr <<  "[GMRF] Saving Factor-Graph (list of triplets) to file..." << std::endl;
+        std::cerr <<  "[GMRF] Jtriplets(" << Jout.size() << ",3), Atriplets(" << Aout.size() << ",3), numFactors(" << yout.rows() << ")" << std::endl;
 
         // 1. Jacobian
         std::ofstream file("~/gmrf_Jacobian.txt");
