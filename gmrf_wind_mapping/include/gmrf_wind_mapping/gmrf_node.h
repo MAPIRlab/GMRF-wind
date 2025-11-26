@@ -54,6 +54,7 @@ protected:
     rclcpp::Subscription<olfaction_msgs::msg::Anemometer>::SharedPtr sub_sensor;
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancyMap_sub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wind_array_pub;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wind_std_array_pub;
 
     // GMRF Maps
     std::unique_ptr<CGMRF_map> my_map;         // The GMRF Map being estimated

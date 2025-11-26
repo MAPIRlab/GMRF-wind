@@ -71,6 +71,7 @@ Cgmrf::Cgmrf()
     // Publishers
     //----------------------------------
     wind_array_pub = create_publisher<visualization_msgs::msg::MarkerArray>("wind_array_pub", 1);
+    wind_std_array_pub = create_publisher<visualization_msgs::msg::Marker>("wind_std_array_pub", 1);
         
     // TF2 Listener
     tf_buffer = std::make_unique<tf2_ros::Buffer>(get_clock(), tf2::Duration(std::chrono::seconds(30)));
@@ -279,8 +280,10 @@ void Cgmrf::publishMaps()
         return;
     
     visualization_msgs::msg::MarkerArray wind_array;
-    Utils::createWindMarkerArrayFromGMRF(*my_map, frame_id, wind_array);
+    visualization_msgs::msg::Marker wind_std_array;
+    Utils::createWindMarkerArrayFromGMRF(*my_map, frame_id, wind_array, wind_std_array);
     wind_array_pub->publish(wind_array);
+    wind_std_array_pub->publish(wind_std_array);
 }
 
 

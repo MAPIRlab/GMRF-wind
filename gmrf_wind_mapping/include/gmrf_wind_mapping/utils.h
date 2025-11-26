@@ -97,13 +97,17 @@ namespace Utils
         color_b = temp_color_b[idx_color];
     }
 
-    void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, std::string& frame_id, visualization_msgs::msg::MarkerArray& wind_array)
+    void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, 
+                                        std::string& frame_id, 
+                                        visualization_msgs::msg::MarkerArray& wind_array, 
+                                        visualization_msgs::msg::Marker& wind_std_array)
     {
         using visualization_msgs::msg::Marker;
         using visualization_msgs::msg::MarkerArray;
 
         // Clear previous markers
         wind_array.markers.clear();
+        wind_std_array.points.clear();
 
         // Get GMRF dimensions
         Eigen::Vector2i dims = my_map.map_size();
@@ -121,27 +125,60 @@ namespace Utils
 
         // Get max wind vector in the map (to normalize the plot)
         double max_module = 0.0;
+        double max_stdDev = 0.0;
         for (size_t i = 0; i < N; ++i)
         {
-            WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction;
+            WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction; w.stdDev;
             if (w.module > max_module)
                 max_module = w.module;
+            if (w.stdDev > max_stdDev)
+                max_stdDev = w.stdDev;
         }
 
-        // Create one ARROW marker per cell
+        // Uncertainty is a single marker of type POINTS
+        wind_std_array.header.frame_id = frame_id;
+        wind_std_array.header.stamp = rclcpp::Time(0);
+        wind_std_array.ns = "gmrf_wind_stddev";
+        wind_std_array.id = 0;
+        wind_std_array.type = Marker::POINTS;
+        wind_std_array.action = Marker::ADD;
+        // shape
+        wind_std_array.scale.x = cell_size;
+        wind_std_array.scale.y = cell_size;
+
+        // And one ARROW/POINTS marker per cell for wind_vector/stdDev
         wind_array.markers.reserve(N);
+        wind_std_array.points.reserve(N);
+        wind_std_array.colors.reserve(N);
         for (size_t i = 0; i < N; ++i)
         {
             // Get wind estimation at cell i
             WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction;
             Eigen::Vector2d vec = w.asEigen();                              //vec.x(); vec.y()
 
-            if (w.module < 0.01 || max_module < 0.01)
-                continue;   // skip near-zero vectors
-
             // Cell center coordinates
             double cx = 0.0, cy = 0.0;
             my_map.id2xy_public(i, cx, cy);
+
+            // Point marker for stdDev
+            {
+                // Add one point at the cell center
+                geometry_msgs::msg::Point p;
+                p.x = cx;
+                p.y = cy;
+                p.z = 0.0;
+                wind_std_array.points.push_back(p);
+                
+                std_msgs::msg::ColorRGBA color;
+                // color -> must normalize to [0-199]
+                get_arrow_color(w.stdDev, max_stdDev, color.r, color.g, color.b);
+                color.a = 1.0;       // transparency
+                wind_std_array.colors.push_back(color);
+            }
+
+            // Arrow marker for wind vector
+            if (w.module < 0.01 || max_module < 0.01)
+                continue;   // skip near-zero vectors
             
             // Create Arrow marker
             Marker m;
