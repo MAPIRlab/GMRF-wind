@@ -574,26 +574,28 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         // Add Observation to GMRF
         add_obs(new_obs);
         nObsFactors += 2; // we add 2 factors foe each observation to account for Wx and Wy components
-
-        // NOTE --> We create 4 observations to expand a bit the measurement impact, replicating the content to neighbour cells
-        if (is_cell_free(cellIdx - 1))
-        {
-            new_obs.cell_idx = cellIdx - 1;
-            add_obs(new_obs);
-            nObsFactors += 2;
-        }
-        if (is_cell_free(cellIdx - m_size_x))
-        {
-            new_obs.cell_idx = cellIdx - m_size_x;
-            add_obs(new_obs);
-            nObsFactors += 2;
-        }
-        if (is_cell_free(cellIdx - m_size_x - 1))
-        {
-            new_obs.cell_idx = cellIdx - m_size_x - 1;
-            add_obs(new_obs);
-            nObsFactors += 2;
-        }
+        
+        /*
+            // NOTE --> Create 4 observations to expand a bit the measurement impact, replicating the content to neighbour cells
+            if (is_cell_free(cellIdx - 1))
+            {
+                new_obs.cell_idx = cellIdx - 1;
+                add_obs(new_obs);
+                nObsFactors += 2;
+            }
+            if (is_cell_free(cellIdx - m_size_x))
+            {
+                new_obs.cell_idx = cellIdx - m_size_x;
+                add_obs(new_obs);
+                nObsFactors += 2;
+            }
+            if (is_cell_free(cellIdx - m_size_x - 1))
+            {
+                new_obs.cell_idx = cellIdx - m_size_x - 1;
+                add_obs(new_obs);
+                nObsFactors += 2;
+            }
+        */
     }
     catch (std::exception e)
     {
