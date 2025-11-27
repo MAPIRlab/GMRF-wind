@@ -39,12 +39,17 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-# BUILDING
+# GMRF-NODE
 add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
 target_include_directories(gmrf_wind_mapping_node PUBLIC ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS} yaml-cpp)
 
+# GMRF-VALIDATION
+add_executable(gmrf_validation src/gmrf_validation.cpp src/gmrf_map.cpp)
+target_include_directories(gmrf_validation PUBLIC ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(gmrf_validation ${OpenCV_LIBS} yaml-cpp)
 
+# DEPENDENCIES
 ament_target_dependencies(gmrf_wind_mapping_node
     rclcpp
     angles
@@ -60,8 +65,26 @@ ament_target_dependencies(gmrf_wind_mapping_node
     gmrf_msgs
 )
 
+ament_target_dependencies(gmrf_validation
+    rclcpp
+    angles
+    Eigen3
+    tf2_ros
+    tf2_geometry_msgs
+    std_msgs
+    nav_msgs
+    sensor_msgs
+    visualization_msgs
+    olfaction_msgs
+    geometry_msgs
+    gmrf_msgs
+)
+
+# INSTALLATION
 install(
-  TARGETS gmrf_wind_mapping_node
+  TARGETS 
+  gmrf_wind_mapping_node
+  gmrf_validation
   DESTINATION lib/${PROJECT_NAME}
 )
 
