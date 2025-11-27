@@ -289,6 +289,14 @@ void Cgmrf::publishMaps()
 
 void Cgmrf::update()
 {
+    // Update Lambda parameters (read parameter server)
+    GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
+    GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+    GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
+    GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
+    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
+
     // Update GMRF estimation
      my_map->updateMapEstimation_GMRF(GMRF_lambdaObsLoss);
 }

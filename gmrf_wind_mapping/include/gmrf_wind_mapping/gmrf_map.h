@@ -73,7 +73,13 @@ struct TimeStats {
     }
 };
 
-
+// Enum for the Factor Types
+enum class FactorType {
+    Regularization,
+    Obstacle,
+    FluxConservation,
+    Observation
+};
 
 class CGMRF_map
 {
@@ -92,7 +98,8 @@ public:
 
     // Insert new observation
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
-
+    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles, double m_lambdaObservations);
+   
     // Solves the Least Squares linear system to determine the new values at each cell
     void updateMapEstimation_GMRF(float lambdaObsLoss);
     void computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hsparse);
@@ -116,6 +123,11 @@ public:
         return m_resolution;
     }
 
+    std::array<double,4> map_dimensions_meters()
+    {
+        return {m_x_min, m_x_max, m_y_min, m_y_max};
+    }
+
 protected:
     std::vector<TRandomFieldCell> m_map;      // GMRF container of nodes
     TOccupancyMap m_Ocgridmap;                // Occupancy gridmap of the environment
@@ -135,12 +147,13 @@ protected:
     size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
     double lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
-    double lambdaPrior_mass_conservation; // Weight for mass conservation law prior
+    double lambdaPrior_flux_conservation; // Weight for flux conservation law prior
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    double lambdaObservations;            // Weight for observations
     // SQRT values (to build J matrix without the Lambda diagonal matrix)
-    double lambdaPrior_reg_sqrt;               // Weight for regularization prior -> neighbour cells have similar wind vectors
-    double lambdaPrior_mass_conservation_sqrt; // Weight for mass conservation law prior
-    double lambdaPrior_obstacles_sqrt;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    //double lambdaPrior_reg_sqrt;               // Weight for regularization prior -> neighbour cells have similar wind vectors
+    //double lambdaPrior_mass_conservation_sqrt; // Weight for mass conservation law prior
+    //double lambdaPrior_obstacles_sqrt;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
 
     struct TobservationGMRF
     {
@@ -153,7 +166,8 @@ protected:
 
     // GMRF Matrices and Structures
     std::vector<Eigen::Triplet<double>> J;          // Jacobian
-    //std::vector<Eigen::Triplet<double>> Lambda;   // the information matrix (weights)
+    std::vector<Eigen::Triplet<double>> Lambda;     // the information matrix (weights or inverse of covariances)
+    std::vector<std::pair<size_t, FactorType>> factor_types; // To keep track of the type of each factor
     std::vector<TobservationGMRF> activeObs;        // Vector with the active observations and their respective Information
 
     // Util Functions

@@ -3,13 +3,14 @@
 #include <iostream>
 #include <iomanip>  // Necesario para std::setprecision
 
+
 /*---------------------------------------------------------------
                         Constructor
   ---------------------------------------------------------------*/
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                      float cell_size, 
                      double m_lambdaPrior_reg,
-                     double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles,
+                     double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles,
                      bool verbose,
                      bool estimateTiming=false)
 {
@@ -23,12 +24,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
         m_resolution = cell_size; // Desired resolution to build the GMRF (m)
         lambdaPrior_reg = m_lambdaPrior_reg;
-        lambdaPrior_mass_conservation = m_lambdaPrior_mass_conservation;
+        lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
         lambdaPrior_obstacles = m_lambdaPrior_obstacles;
         // Compute SQRT values
-        lambdaPrior_reg_sqrt = std::sqrt(lambdaPrior_reg);
-        lambdaPrior_mass_conservation_sqrt = std::sqrt(lambdaPrior_mass_conservation);
-        lambdaPrior_obstacles_sqrt = std::sqrt(lambdaPrior_obstacles);
+        //lambdaPrior_reg_sqrt = std::sqrt(lambdaPrior_reg);
+        //lambdaPrior_flux_conservation_sqrt = std::sqrt(lambdaPrior_flux_conservation);
+        //lambdaPrior_obstacles_sqrt = std::sqrt(lambdaPrior_obstacles);
 
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
         double x_min = oc_map.origin_x;
@@ -80,12 +81,11 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         if (verbose)
             std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
 
-        // Reserve memory for the Jacobian
-        // In this implementation we fuse the Information Matrix Within the Jacobian
+        // Reserve memory for the Jacobian and Information matrix
         J.clear();
         J.reserve(5 * nFactors); // Each factor accounts for the connectivity of multiple nodes -->multiple entries
-        //Lambda.clear();
-        //Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
+        Lambda.clear();
+        Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
 
        
         // 3. Build Prior Factors (just once if the map is static)
@@ -106,16 +106,18 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 // Cell is occupied in the provided OccupancyGrid --> Estimation here has no sense
                 // Since we cannot remove this cell, we will force Wx=0 and Wy=0
                 // Wx(j) = 0               
-                Eigen::Triplet<double> J_entry(count, j, lambdaPrior_obstacles_sqrt);
+                Eigen::Triplet<double> J_entry(count, j, 1);
                 J.push_back(J_entry);
+                factor_types.push_back({count, FactorType::Obstacle});
                 //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry); 
+                //Lambda.push_back(lambda_entry);
                 count++;
                 // Wy(j) = 0
-                Eigen::Triplet<double> J_entry2(count, j + N, lambdaPrior_obstacles_sqrt);               
+                Eigen::Triplet<double> J_entry2(count, j + N, 1);               
                 J.push_back(J_entry2);
+                factor_types.push_back({count, FactorType::Obstacle});
                 //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry2);                
+                //Lambda.push_back(lambda_entry2);
                 count++;
             }
 
@@ -129,21 +131,23 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     {
                         // Regularization Factor: cells j and j+1 should have similar wind values
                         // Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, lambdaPrior_reg_sqrt);
-                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -lambdaPrior_reg_sqrt);
-                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry);
+                        Eigen::Triplet<double> J_entry1(count, j, 1);
+                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1);
                         J.push_back(J_entry1);
                         J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Regularization});
+                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
+                        //Lambda.push_back(lambda_entry);
                         count++;
 
                         // Wy range [N+1,2N]                        
-                        Eigen::Triplet<double> J_entry3(count, j + N, lambdaPrior_reg_sqrt);
-                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -lambdaPrior_reg_sqrt);
-                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry2);
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
+                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1);
                         J.push_back(J_entry3);
                         J.push_back(J_entry4);
+                        factor_types.push_back({count, FactorType::Regularization});
+                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
+                        //Lambda.push_back(lambda_entry2);
                         count++;
                     }
                     else
@@ -152,25 +156,28 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         // 1. Do not create a regularization link
                         // 2. Force Wx=0 at both cells
                         // Wx(j) = 0
-                        Eigen::Triplet<double> J_entry(count, j, lambdaPrior_obstacles_sqrt);
+                        Eigen::Triplet<double> J_entry(count, j, 1);
                         J.push_back(J_entry);
-                        count++;
+                        factor_types.push_back({count, FactorType::Obstacle});
                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
                         //Lambda.push_back(lambda_entry);
+                        count++;
                         
                         // Wx(j+1) = 0
-                        Eigen::Triplet<double> J_entry2(count, j + 1, lambdaPrior_obstacles_sqrt);
+                        Eigen::Triplet<double> J_entry2(count, j + 1, 1);
                         J.push_back(J_entry2);
-                        count++;
+                        factor_types.push_back({count, FactorType::Obstacle});
                         //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
                         //Lambda.push_back(lambda_entry2);
+                        count++;
                     }
                 }
                 else if (is_cell_free(j))
                 {
                     // Cell j+1 is occupied. Force Wx=0 at j
-                    Eigen::Triplet<double> J_entry(count, j, lambdaPrior_obstacles_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j, 1);
                     J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle});
                     count++;
                     //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
                     //Lambda.push_back(lambda_entry);
@@ -178,8 +185,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 else if (is_cell_free(j + 1))
                 {
                     // Cell j is occupied. Force Wx=0 at j+1
-                    Eigen::Triplet<double> J_entry(count, j + 1, lambdaPrior_obstacles_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + 1, 1);
                     J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle});
                     count++;
                     //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
                     //Lambda.push_back(lambda_entry);
@@ -197,19 +205,21 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     {
                         // Regularization Factor: cells j and j+m_size_x should have similar wind values
                         //  Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, lambdaPrior_reg_sqrt);
-                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -lambdaPrior_reg_sqrt);
+                        Eigen::Triplet<double> J_entry1(count, j, 1);
+                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1);
                         J.push_back(J_entry1);
                         J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Regularization});
                         count++;
                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
                         //Lambda.push_back(lambda_entry);
 
                         // Wy range [N+1,2N]
-                        Eigen::Triplet<double> J_entry3(count, j + N, lambdaPrior_reg_sqrt);
-                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -lambdaPrior_reg_sqrt);
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
+                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1);
                         J.push_back(J_entry3);
                         J.push_back(J_entry4);
+                        factor_types.push_back({count, FactorType::Regularization});
                         count++;
                         // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
                         // Lambda.push_back(lambda_entry2);
@@ -220,15 +230,17 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         // 1. Do not create a regularization link
                         // 2. Force Wy=0 at both cells
                         // Force Wy=0 at j
-                        Eigen::Triplet<double> J_entry(count, j + N, lambdaPrior_obstacles_sqrt);                        
+                        Eigen::Triplet<double> J_entry(count, j + N, 1);                        
                         J.push_back(J_entry);
+                        factor_types.push_back({count, FactorType::Obstacle});
                         count++;
                         // Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
                         // Lambda.push_back(lambda_entry);
                         
                         // Force Wy=0 at j+m_size_x
-                        Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, lambdaPrior_obstacles_sqrt);
+                        Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
                         J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Obstacle});
                         count++;
                         // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
                         // Lambda.push_back(lambda_entry2);                        
@@ -237,8 +249,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 else if (is_cell_free(j))
                 {
                     // Cell j+m_size_x is occupied. Force Wy=0 at j
-                    Eigen::Triplet<double> J_entry(count, j + N, lambdaPrior_obstacles_sqrt);                    
+                    Eigen::Triplet<double> J_entry(count, j + N, 1);                    
                     J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle});
                     count++;
                     //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
                     //Lambda.push_back(lambda_entry);
@@ -246,8 +259,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 else if (is_cell_free(j + m_size_x))
                 {
                     // Cell j is occupied. Force Wy=0 at j+m_size_x
-                    Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, lambdaPrior_obstacles_sqrt);
+                    Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
                     J.push_back(J_entry2);
+                    factor_types.push_back({count, FactorType::Obstacle});
                     count++;
                     // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
                     //Lambda.push_back(lambda_entry2);
@@ -264,25 +278,25 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 bool set = false;
                 if (is_cell_free(j - 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j - 1, -lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j - 1, -1);
                     J.push_back(J_entry);
                     set = true;
                 }
                 if (is_cell_free(j + 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j + 1, lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + 1, 1);
                     J.push_back(J_entry);
                     set = true;
                 }
                 if (is_cell_free(j - m_size_x))
                 {
-                    Eigen::Triplet<double> J_entry(count, j + N - m_size_x, -lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + N - m_size_x, -1);
                     J.push_back(J_entry);
                     set = true;
                 }
                 if (is_cell_free(j + m_size_x))
                 {
-                    Eigen::Triplet<double> J_entry(count, j + N + m_size_x, lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + N + m_size_x, 1);
                     J.push_back(J_entry);
                     set = true;
                 }
@@ -290,32 +304,32 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 // Diagonals
                 if (is_cell_free(j + m_size_x - 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j + m_size_x - 1, -0.5*lambdaPrior_mass_conservation_sqrt);
-                    Eigen::Triplet<double> J_entry2(count, j + m_size_x - 1 + N, 0.5*lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + m_size_x - 1, -0.5);
+                    Eigen::Triplet<double> J_entry2(count, j + m_size_x - 1 + N, 0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
                     set = true;
                 }
                 if (is_cell_free(j + m_size_x + 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j + m_size_x + 1, 0.5*lambdaPrior_mass_conservation_sqrt);
-                    Eigen::Triplet<double> J_entry2(count, j + m_size_x + 1 + N, 0.5*lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j + m_size_x + 1, 0.5);
+                    Eigen::Triplet<double> J_entry2(count, j + m_size_x + 1 + N, 0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
                     set = true;
                 }
                 if (is_cell_free(j - m_size_x + 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j - m_size_x + 1, 0.5*lambdaPrior_mass_conservation_sqrt);
-                    Eigen::Triplet<double> J_entry2(count, j - m_size_x + 1 + N, -0.5*lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j - m_size_x + 1, 0.5);
+                    Eigen::Triplet<double> J_entry2(count, j - m_size_x + 1 + N, -0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
                     set = true;
                 }
                 if (is_cell_free(j - m_size_x - 1))
                 {
-                    Eigen::Triplet<double> J_entry(count, j - m_size_x - 1, -0.5*lambdaPrior_mass_conservation_sqrt);
-                    Eigen::Triplet<double> J_entry2(count, j - m_size_x - 1 + N, -0.5*lambdaPrior_mass_conservation_sqrt);
+                    Eigen::Triplet<double> J_entry(count, j - m_size_x - 1, -0.5);
+                    Eigen::Triplet<double> J_entry2(count, j - m_size_x - 1 + N, -0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
                     set = true;
@@ -324,7 +338,8 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 // If factor is to be set...
                 if (set)
                 {
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_mass_conservation);
+                    factor_types.push_back({count, FactorType::FluxConservation});
+                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_flux_conservation);
                     //Lambda.push_back(lambda_entry);
                     count++;
                     set = false;
@@ -344,24 +359,24 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         // DEBUG: Save to file
         //-------------------
         /*
-        Eigen::VectorXd y_empty;
-        y_empty.resize(nFactors);
-        y_empty.fill(0.0);
-        save_grmf_factor_graph(J,Lambda,y_empty);
-        */
+            Eigen::VectorXd y_empty;
+            y_empty.resize(nFactors);
+            y_empty.fill(0.0);
+            save_grmf_factor_graph(J,Lambda,y_empty);
+            */
 
-        // DEGUB : ADD FIXED OBSERVATION
-        /*
-        TobservationGMRF new_obs;
-        const int cellIdx = xy2idx( 3.0, 3.0 );
-        new_obs.cell_idx = cellIdx;
-        new_obs.windX = 0.10;
-        new_obs.windY = 1.0;
-        new_obs.lambda = 13;
-        new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-        std::cerr <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
-        activeObs.push_back(new_obs);
-        nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
+            // DEGUB : ADD FIXED OBSERVATION
+            /*
+            TobservationGMRF new_obs;
+            const int cellIdx = xy2idx( 3.0, 3.0 );
+            new_obs.cell_idx = cellIdx;
+            new_obs.windX = 0.10;
+            new_obs.windY = 1.0;
+            new_obs.lambda = 13;
+            new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
+            std::cerr <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
+            activeObs.push_back(new_obs);
+            nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
         */
     }
     catch (std::exception e)
@@ -379,6 +394,18 @@ CGMRF_map::~CGMRF_map()
 {
 }
 
+
+void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
+                        double m_lambdaPrior_flux_conservation, 
+                        double m_lambdaPrior_obstacles,
+                        double m_lambdaObservations)
+{
+    // Update internal variables
+    lambdaPrior_reg = m_lambdaPrior_reg;
+    lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
+    lambdaPrior_obstacles = m_lambdaPrior_obstacles;
+    lambdaObservations = m_lambdaObservations;
+}
 
 /*---------------------------------------------------------------
                         Cell index transformations
@@ -589,7 +616,7 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         *              J is size (nFactors x NumNodes)
         *
         * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
-        *              Lambda is size (nFactors x nFactors). In this implementation, we fuse it within J
+        *              Lambda is size (nFactors x nFactors).
         *
         * Y (vector of observations) contains the values of observations, 0 for prior factors
         *              y is size (nFactors x 1)
@@ -610,45 +637,68 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
 
-        // 2. Copy The prior part of Jacobian and Lambda matrices
+        // 2. Copy The prior part of Jacobian (fixed)
         std::vector<Eigen::Triplet<double>> J_temp;
         J_temp.reserve(J.size() + nObsFactors);
         std::copy(J.begin(), J.end(), back_inserter(J_temp));
 
-        //std::vector<Eigen::Triplet<double>> Lambda_temp;
-        //Lambda_temp.reserve(Lambda.size() + nObsFactors);
+        // 3. Generate the Lambda matrix with prior values of lambdas (parameters might have changed)
+        std::vector<Eigen::Triplet<double>> Lambda_temp;
+        Lambda_temp.reserve(factor_types.size() + nObsFactors);
         //std::copy(Lambda.begin(), Lambda.end(), back_inserter(Lambda_temp));
+        for (std::vector<std::pair<size_t, FactorType>>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
+        {
+            double lambda_value = 0.0;
+            switch (it->second)
+            {
+                case FactorType::Regularization:
+                    lambda_value = lambdaPrior_reg;
+                    break;
+                case FactorType::FluxConservation:
+                    lambda_value = lambdaPrior_flux_conservation;
+                    break;
+                case FactorType::Obstacle:
+                    lambda_value = lambdaPrior_obstacles;
+                    break;
+                default:
+                    lambda_value = 0.0;
+                    break;
+            }
+            Eigen::Triplet<double> lambda_entry(it->first, it->first, lambda_value);
+            Lambda_temp.push_back(lambda_entry);
+        }
 
+        // 4. Include Observations (Jacobian and Lambda)
         Eigen::VectorXd y_temp;
         y_temp.resize(nFactors);
         y_temp.fill(0.0);
-
-        // 3. Include Active Observations into Jacobian and Lambda
         size_t count = nPriorFactors; // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
             // Each observation translates to 2 factors (Wx,Wy)
             // Wx range [1,N]
-            Eigen::Triplet<double> J_entry(count, ito->cell_idx, ito->lambda);            
+            Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
             J_temp.push_back(J_entry);
             y_temp[count] = ito->windX;
             //Eigen::Triplet<double> lambda_entry(count, count, ito->lambda);
-            //Lambda_temp.push_back(lambda_entry);
+            Eigen::Triplet<double> lambda_entry(count, count, lambdaObservations); // Use fixed lambda for observations (param)
+            Lambda_temp.push_back(lambda_entry);
             count++;
 
             // Wy range [N+1,2N]            
-            Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, ito->lambda);                
+            Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
             J_temp.push_back(J_entry2);
             y_temp[count] = ito->windY;
             //Eigen::Triplet<double> lambda_entry2(count, count, ito->lambda);
-            //Lambda_temp.push_back(lambda_entry2);
+            Eigen::Triplet<double> lambda_entry2(count, count, lambdaObservations); // Use fixed lambda for observations (param)
+            Lambda_temp.push_back(lambda_entry2);
             count++;
         }
 
         // DEBUG - Save to file
         // save_grmf_factor_graph(J_temp,Lambda_temp,y_temp);
 
-        // 3. Build Matrices (J, J', A, H, G)
+        // 5. Build Matrices (J, J', A, H, G)
         Eigen::SparseMatrix<double> Jsparse(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
         if (verbose)
@@ -659,23 +709,24 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         if (verbose)
             std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
-        //Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
-        //Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
-        //if (verbose)
-        //    std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
+        Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
+        Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
+        if (verbose)
+            std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
 
         Eigen::SparseMatrix<double> Hsparse; // size(2*N,2*N);
-        //Hsparse = JsparseT * Asparse * Jsparse;
-        Hsparse = JsparseT * Jsparse;   // Since we fused Lambda into J
+        Hsparse = JsparseT * Asparse * Jsparse;
+        //Hsparse = JsparseT * Jsparse;   // Since we fused Lambda into J
         if (verbose)
             std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
-        //Eigen::VectorXd G = JsparseT * Asparse * y_temp;
-        Eigen::VectorXd G = JsparseT * y_temp; // Since we fused Lambda into J
+        Eigen::VectorXd G = JsparseT * Asparse * y_temp;
+        //Eigen::VectorXd G = JsparseT * y_temp; // Since we fused Lambda into J
         if (verbose)
             std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
         // DEBUG - Save to file
         // save_grmf_factor_graph(Hsparse, G);
+        
 
         
         //----------
