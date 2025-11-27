@@ -98,7 +98,7 @@ namespace Utils
     }
 
     void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, 
-                                        std::string& frame_id, 
+                                        std::string frame_id, 
                                         visualization_msgs::msg::MarkerArray& wind_array, 
                                         visualization_msgs::msg::Marker& wind_std_array)
     {
