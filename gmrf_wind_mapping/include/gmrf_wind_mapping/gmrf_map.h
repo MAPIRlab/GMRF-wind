@@ -112,7 +112,8 @@ public:
     // This forwards to the internal id2xy() utility and is provided for visualization
     // helpers that need world coordinates for each GMRF cell.
     void id2xy_public(size_t id, double& x, double& y);
-
+    bool is_cell_free(size_t id_gmrf);
+     
     Eigen::Vector2i map_size()
     {
         return {m_size_x, m_size_y};
@@ -171,7 +172,6 @@ protected:
     std::vector<TobservationGMRF> activeObs;        // Vector with the active observations and their respective Information
 
     // Util Functions
-    bool is_cell_free(size_t id_gmrf);
     bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
 
     int xy2idx(float x, float y) const;
