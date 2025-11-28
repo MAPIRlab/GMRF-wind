@@ -405,6 +405,7 @@ void Cvalgt::update()
      gmrf_map->updateMapEstimation_GMRF(GMRF_lambdaObsLoss);
 }
 
+
 void Cvalgt::compute_performance_metrics()
 {
     // Compare current GMRF estimation with GT map
@@ -414,7 +415,7 @@ void Cvalgt::compute_performance_metrics()
     using visualization_msgs::msg::Marker;
     Marker metric_marker;
 
-    // Metric is a single marker of type POINTS
+    // Visualization Metric is a single marker of type POINTS
     metric_marker.header.frame_id = "map";
     metric_marker.header.stamp = rclcpp::Time(0);
     metric_marker.ns = "gmrf_metric";
@@ -429,9 +430,14 @@ void Cvalgt::compute_performance_metrics()
     metric_marker.points.reserve(N);
     metric_marker.colors.reserve(N);
 
+    // METRICS
+    double sum_cosine_sim = 0.0;        // Normalized Cosine Similarity
+    double sum_squared_error = 0.0;     // Normalized RMSE
+    double sum_gt_magnitudes = 0.0;
+
     for (size_t i = 0; i < N; ++i)
     {
-        // Avoid occupied cells
+        // Skip occupied cells
         if (gmrf_map->is_cell_free(i))
         {
             // Get GMRF estimation at cell i
@@ -448,7 +454,8 @@ void Cvalgt::compute_performance_metrics()
             double gt_module = sqrt(pow(gt_wind.x,2) + pow(gt_wind.y,2));
             double gt_direction = atan2(gt_wind.y, gt_wind.x);
 
-            // METRIC1: Normalized Cosine Similarity (cell level)
+            // ===================================================
+            // METRIC1: Normalized Cosine Similarity
             // Does not consider the uncertainty
             // ===================================================
             // 1. Calculate the dot product
@@ -470,7 +477,22 @@ void Cvalgt::compute_performance_metrics()
             // 5. Normalize the angle from [0, pi] range to [0, 1] range
             // The maximum possible angle (180 degrees or pi radians) becomes 1.0
             // The minimum possible angle (0 degrees) becomes 0.0
-            double normalized_distance = angle_radians / M_PI;
+            double normalized_csm = angle_radians / M_PI;
+
+            // 6. Accumulate
+            sum_cosine_sim += normalized_csm;
+
+            //===================================
+            // METRIC2: Normalized RMSE
+            // Does not consider the uncertainty
+            //===================================
+            double diff_x = gt_x - est_x;
+            double diff_y = gt_y - est_y;
+            sum_squared_error += (diff_x * diff_x + diff_y * diff_y);
+
+            // Calculate the magnitude of the ground truth vector: ||GT_i|| for normalization
+            sum_gt_magnitudes += std::sqrt(gt_x * gt_x + gt_y * gt_y);
+            
 
             // ===============================
             // VISUALIZE METRIC
@@ -488,13 +510,22 @@ void Cvalgt::compute_performance_metrics()
             
             std_msgs::msg::ColorRGBA color;
             // color -> must normalize to [0-199]
-            Utils::get_arrow_color(normalized_distance, 1, color.r, color.g, color.b);
+            Utils::get_arrow_color(normalized_csm , 1, color.r, color.g, color.b);
             color.a = 1.0;       // transparency
             metric_marker.colors.push_back(color);
         }
     }
-
     metric_pub->publish(metric_marker);
+
+
+    // NRMSE Map Metric
+    double rmse = std::sqrt(sum_squared_error / N);
+    double NRMSE = rmse / ( sum_gt_magnitudes / N);
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] NRMSE = %.2f", NRMSE);
+
+    // NCosSim Map Metric
+    double NCosSim = sum_cosine_sim / N;
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Cosine Similarity = %.2f", NCosSim);
 }
 
 
