@@ -426,14 +426,15 @@ void Cvalgt::compute_performance_metrics()
     metric_marker.scale.x = cell_size;
     metric_marker.scale.y = cell_size;
 
-    // And one POINTS marker per cell
+    // Add one POINTS marker per cell
     metric_marker.points.reserve(N);
     metric_marker.colors.reserve(N);
 
     // METRICS
-    double sum_cosine_sim = 0.0;        // Normalized Cosine Similarity
-    double sum_squared_error = 0.0;     // Normalized RMSE
-    double sum_gt_magnitudes = 0.0;
+    double sum_cosine_sim = 0.0;        // Normalized Cosine Similarity (0-1)
+    double sum_squared_error = 0.0;     // Normalized RMSE (0-inf)
+    double sum_gt_magnitudes = 0.0;     // To normalize the RMSE
+    double sum_NLL = 0.0;               // Normalized Negative Log-Likelihood (NLL)
 
     for (size_t i = 0; i < N; ++i)
     {
@@ -446,6 +447,9 @@ void Cvalgt::compute_performance_metrics()
             double est_y = est_wind.module * sin(est_wind.direction);
             double est_module = est_wind.module;
             double est_direction = est_wind.direction;
+            double est_std = est_wind.stdDev;
+            double est_stdX = est_wind.stdDevX;
+            double est_stdY = est_wind.stdDevY;
 
             // Get GT wind at cell i
             WindVectorXY gt_wind = gt_map[i];
@@ -455,8 +459,7 @@ void Cvalgt::compute_performance_metrics()
             double gt_direction = atan2(gt_wind.y, gt_wind.x);
 
             // ===================================================
-            // METRIC1: Normalized Cosine Similarity
-            // Does not consider the uncertainty
+            // METRIC1: Normalized Cosine Similarity (only direction)
             // ===================================================
             // 1. Calculate the dot product
             double dot_product = est_x * gt_x + est_y * gt_y;
@@ -482,17 +485,32 @@ void Cvalgt::compute_performance_metrics()
             // 6. Accumulate
             sum_cosine_sim += normalized_csm;
 
+
             //===================================
             // METRIC2: Normalized RMSE
-            // Does not consider the uncertainty
             //===================================
             double diff_x = gt_x - est_x;
             double diff_y = gt_y - est_y;
-            sum_squared_error += (diff_x * diff_x + diff_y * diff_y);
+            double squared_error = (diff_x * diff_x + diff_y * diff_y);
+            sum_squared_error += squared_error;
 
             // Calculate the magnitude of the ground truth vector: ||GT_i|| for normalization
             sum_gt_magnitudes += std::sqrt(gt_x * gt_x + gt_y * gt_y);
             
+
+            //===============================
+            // METRIC3: Negative Log-Likelihood (NLL)
+            // Considers the uncertainty of the estimation
+            //===============================
+            double mahalanobis_distance_squared = (pow(gt_x - est_x, 2) / (est_stdX * est_stdX + 1e-6)) +
+                                                  (pow(gt_y - est_y, 2) / (est_stdY * est_stdY + 1e-6));
+
+            double NLL = 0.5 * mahalanobis_distance_squared + std::log(est_stdX) + std::log(est_stdY);
+            sum_NLL += NLL;
+
+            // Accumulate
+            sum_NLL += NLL;
+
 
             // ===============================
             // VISUALIZE METRIC
@@ -510,7 +528,7 @@ void Cvalgt::compute_performance_metrics()
             
             std_msgs::msg::ColorRGBA color;
             // color -> must normalize to [0-199]
-            Utils::get_arrow_color(normalized_csm , 1, color.r, color.g, color.b);
+            Utils::get_arrow_color(NLL , 1, color.r, color.g, color.b);
             color.a = 1.0;       // transparency
             metric_marker.colors.push_back(color);
         }
@@ -525,7 +543,11 @@ void Cvalgt::compute_performance_metrics()
 
     // NCosSim Map Metric
     double NCosSim = sum_cosine_sim / N;
-    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Cosine Similarity = %.2f", NCosSim);
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average Cosine Similarity = %.2f", NCosSim);
+
+    // NLL Map Metric
+    double NLL_metric = sum_NLL / N;
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLL = %.2f", NLL_metric);
 }
 
 
