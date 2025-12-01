@@ -876,9 +876,11 @@ WindVector CGMRF_map::getEstimation(int index)
 {
     double module = sqrt(pow(m_map[index].mean, 2) + pow(m_map[index + N].mean, 2));
     double direction = atan2(m_map[index + N].mean, m_map[index].mean);
-    double stdev = std::max(0.1, sqrt(pow(m_map[index].std, 2) + pow(m_map[index + N].std, 2)));
+    double stdev = std::max(0.01, sqrt(pow(m_map[index].std, 2) + pow(m_map[index + N].std, 2)));
+    double stdevX = std::max(0.01, m_map[index].std);
+    double stdevY = std::max(0.01, m_map[index + N].std);
 
-    return {module, direction, stdev};
+    return {module, direction, stdev, stdevX, stdevY};
 }
 
 WindVector CGMRF_map::getEstimation(double x, double y)

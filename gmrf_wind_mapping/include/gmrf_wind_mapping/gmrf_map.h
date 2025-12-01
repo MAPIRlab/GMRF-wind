@@ -39,6 +39,8 @@ struct WindVector
     double module;
     double direction;
     double stdDev;
+    double stdDevX;
+    double stdDevY;
 
     Eigen::Vector2d asEigen()
     {
