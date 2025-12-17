@@ -10,7 +10,9 @@
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                      float cell_size, 
                      double m_lambdaPrior_reg,
-                     double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles,
+                     double m_lambdaPrior_flux_conservation, 
+                     double m_lambdaPrior_obstacles,
+                     double m_lambdaObservations,
                      bool verbose,
                      bool estimateTiming=false)
 {
@@ -26,6 +28,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         lambdaPrior_reg = m_lambdaPrior_reg;
         lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
         lambdaPrior_obstacles = m_lambdaPrior_obstacles;
+        lambdaObservations = m_lambdaObservations;
         // Compute SQRT values
         //lambdaPrior_reg_sqrt = std::sqrt(lambdaPrior_reg);
         //lambdaPrior_flux_conservation_sqrt = std::sqrt(lambdaPrior_flux_conservation);
@@ -606,10 +609,106 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
 }
 
 
+void CGMRF_map::clearObservations_GMRF()
+{
+    try
+    {
+        activeObs.clear();
+        nObsFactors = 0;
+    }
+    catch (std::exception e)
+    {
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-clearObservations_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+    }
+}
+
+
+// ----------------------------------------------------------------------
+// ------------ LOG MARGINAL LIKELIHOOD OPTIMIZATION LOOP ---------------
+// ----------------------------------------------------------------------
+void CGMRF_map::optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
+{
+    if (verbose) std::cerr << "[GMRF] Starting GMRF Estimation..." << (performLMLOptimization ? " (LML Optimization Active)" : " (Fixed Hyperparameters)") << std::endl;
+    
+    // Always run at least one MAP estimation, even if not optimizing
+    if (!performLMLOptimization) {
+        MAP_estimation_GMRF();
+        return; // MAP done, exit
+    }
+
+    // LML Optimization Loop -> We optimize the hyperparameters (lambdas) by maximizing the Log Marginal Likelihood
+    //-----------------------------------------------------------
+    double currentLML = -std::numeric_limits<double>::infinity();
+    double prevLML = -std::numeric_limits<double>::infinity();
+    
+    // Define the lambda vector for easy update and gradient calculation
+    // Order: [0]Obs, [1]Reg, [2]Flux, [3]Obstacle
+    Eigen::Vector4d lambdaVec;
+    Eigen::Vector4d gradientVec;
+    
+    for (int iter = 0; iter < maxIterations; ++iter)
+    {
+        if (verbose) std::cerr << "\n[LML Iteration " << iter + 1 << "]" << std::endl;
+        
+        // Load current hyperparameters into vector
+        lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
+        
+        // --- 2.1 State Estimation (MAP) ---
+        // Compute MAP estimate using the current lambdas
+        MAP_estimation_GMRF();
+                
+        // --- 2.2 Hyperparameter Maximization (LML & Gradient) ---
+        prevLML = currentLML;
+        
+        std::pair<double, Eigen::Vector4d> result = calculate_LML_gradient();
+        currentLML = result.first;
+        gradientVec = result.second;
+        
+        if (verbose) {
+            std::cerr << "  -> LML: " << currentLML << std::endl;
+            std::cerr << "  -> Lambdas: " << lambdaVec.transpose() << std::endl;
+            std::cerr << "  -> Gradient: " << gradientVec.transpose() << std::endl;
+        }
+
+        // --- 2.3 Check Convergence ---
+        if (iter > 0 && std::abs(currentLML - prevLML) < LML_threshold) {
+            if (verbose) std::cerr << "[LML] Optimization converged. Delta LML: " << (currentLML - prevLML) << std::endl;
+            break;
+        }
+        
+        // --- 2.4 Gradient Ascent Update (Simplified Optimizer) ---
+        lambdaVec += learningRate * gradientVec;
+
+        // Apply boundary constraints (lambdas must be positive)
+        for (int i = 0; i < 4; ++i) {
+            if (lambdaVec(i) < 1e-9) lambdaVec(i) = 1e-9;
+        }
+
+        // Update class members for next MAP step
+        lambdaObservations = lambdaVec(0);
+        lambdaPrior_reg = lambdaVec(1);
+        lambdaPrior_flux_conservation = lambdaVec(2);
+        lambdaPrior_obstacles = lambdaVec(3);
+    }
+}
+
+
+double CGMRF_map::getLambdaValue(FactorType type) const {
+    switch (type) {
+        case FactorType::Regularization: return lambdaPrior_reg;
+        case FactorType::FluxConservation: return lambdaPrior_flux_conservation;
+        case FactorType::Obstacle: return lambdaPrior_obstacles;
+        case FactorType::Observation: return lambdaObservations;
+        default: return 0.0;
+    }
+}
+
 /*---------------------------------------------------------------
-                    updateMapEstimation_GMRF
+                MAXIMUM A POSTERIORI Estimation GMRF
   ---------------------------------------------------------------*/
-void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
+void CGMRF_map::MAP_estimation_GMRF()
 {
     try
     {
@@ -639,42 +738,28 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
 
-        // 2. Copy The prior part of Jacobian (fixed)
+        // 2. Setup the prior part of Jacobian (fixed)
         std::vector<Eigen::Triplet<double>> J_temp;
         J_temp.reserve(J.size() + nObsFactors);
         std::copy(J.begin(), J.end(), back_inserter(J_temp));
 
-        // 3. Generate the Lambda matrix with prior values of lambdas (parameters might have changed)
+        // 3. Setup Lambda matrix and data (y) vector
         std::vector<Eigen::Triplet<double>> Lambda_temp;
-        Lambda_temp.reserve(factor_types.size() + nObsFactors);
-        //std::copy(Lambda.begin(), Lambda.end(), back_inserter(Lambda_temp));
+        Lambda_temp.reserve(nFactors);
+        Eigen::VectorXd y_temp;
+        y_temp.resize(nFactors);
+        y_temp.fill(0.0);
+        
+        // LAMBDA PRIOR FACTORS
         for (std::vector<std::pair<size_t, FactorType>>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
         {
-            double lambda_value = 0.0;
-            switch (it->second)
-            {
-                case FactorType::Regularization:
-                    lambda_value = lambdaPrior_reg;
-                    break;
-                case FactorType::FluxConservation:
-                    lambda_value = lambdaPrior_flux_conservation;
-                    break;
-                case FactorType::Obstacle:
-                    lambda_value = lambdaPrior_obstacles;
-                    break;
-                default:
-                    lambda_value = 0.0;
-                    break;
-            }
+            double lambda_value = getLambdaValue(it->second);
             Eigen::Triplet<double> lambda_entry(it->first, it->first, lambda_value);
             Lambda_temp.push_back(lambda_entry);
         }
 
-        // 4. Include Observations (Jacobian and Lambda)
-        Eigen::VectorXd y_temp;
-        y_temp.resize(nFactors);
-        y_temp.fill(0.0);
-        size_t count = nPriorFactors; // start after the already introduced prior factors
+        // 4. OBSERVATION FACTORS
+        size_t count = nPriorFactors;       // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
             // Each observation translates to 2 factors (Wx,Wy)
@@ -697,104 +782,57 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
             count++;
         }
 
-        // DEBUG - Save to file
-        // save_grmf_factor_graph(J_temp,Lambda_temp,y_temp);
-
-        // 5. Build Matrices (J, J', A, H, G)
-        Eigen::SparseMatrix<double> Jsparse(nFactors, 2 * N); // declares a column-major sparse matrix type of float
+        
+        // 5. Build Matrices (J, J', Lambda(A), H, G)
+        Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
-        if (verbose)
+        if (false)
             std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
-        Eigen::SparseMatrix<double> JsparseT; // size(2*N,nFactors);
-        JsparseT = Eigen::SparseMatrix<double>(Jsparse.transpose());
-        if (verbose)
+        Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
+        if (false)
             std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
         Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
-        if (verbose)
+        if (false)
             std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
 
-        Eigen::SparseMatrix<double> Hsparse; // size(2*N,2*N);
-        Hsparse = JsparseT * Asparse * Jsparse;
-        //Hsparse = JsparseT * Jsparse;   // Since we fused Lambda into J
-        if (verbose)
+        Hsparse.resize(2 * N, 2 * N);
+        Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
+        if (false)
             std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
-        Eigen::VectorXd G = JsparseT * Asparse * y_temp;
-        //Eigen::VectorXd G = JsparseT * y_temp; // Since we fused Lambda into J
-        if (verbose)
+        Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
+        if (false)
             std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
-        // DEBUG - Save to file
-        // save_grmf_factor_graph(Hsparse, G);
         
-
         
         //----------
-        // 4. SOLVE
+        // 6. SOLVE H * m = G
         //----------
-        // We need to solve: H * m = G
         // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
-        Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;
         solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
-        Eigen::VectorXd m_MAP_sol = solver.solve(G);
+        m_MAP_sol = solver.solve(G);
+        if (false)
+            std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
 
         if (estimateTiming){
             meanTimer.stop(); // Stop Timer for Mean computation
             auto mean_time_ms = meanTimer.getMeanTimeMs();
             std::cerr << "[GMRF] Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
         }
-
-        if (verbose)
-            std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
         
-        // DEBUG - Save to file
-        //std::ofstream file("~/gmrf_solution.txt");
-        //if (file.is_open())
-        //{
-        //    file << m_inc;
-        //}
-        //file.close();
-
-
-        // 5. Update GMRF values from current solution
+        // 7. Update GMRF values from current solution
         for (size_t j = 0; j < m_map.size(); j++)
         {
             m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
             m_map[j].std = 0.0;             // Not estimated yet. We need inv(H) diagonal for that.
         }
 
-        // Uncertainty estimation
-        if (estimateTiming) stdTimer.start(); // Start Timer for Uncertainty computation        
-        computeUncertainty_GMRF(Hsparse);
-        if (estimateTiming){
-            stdTimer.stop(); // Stop Timer for Uncertainty computation
-            auto std_time_ms = stdTimer.getMeanTimeMs();
-            std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
-        }
-
-        // 6. Update Information/Strength of Active Observations
-        //-------------------------------------------------------
-        std::vector<TobservationGMRF>::iterator ito = activeObs.begin();
-        while (ito != activeObs.end())
-        {
-            if (ito->time_invariant == false)
-            {
-                ito->lambda -= lambdaObsLoss;
-                if (ito->lambda <= 0.0)
-                {
-                    ito = activeObs.erase(ito);
-                    nObsFactors -= 2;
-                }
-                else
-                    ++ito;
-            }
-            else
-                ++ito;
-        }
-        if (verbose)
-            std::cerr <<  "[GMRF] "<< nObsFactors << " ObservationFactors are active" << std::endl;
+        // Calculate the final residual vector (r = J*m - y)
+        residual = Jsparse * m_MAP_sol - y_temp;
+        std::cerr << "[GMRF] MAP estimated with residual norm " << residual.norm() << std::endl;
     }
     catch (std::exception e)
     {
@@ -805,14 +843,15 @@ void CGMRF_map::updateMapEstimation_GMRF(float lambdaObsLoss)
 }
 
 
-void CGMRF_map::computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hsparse)
+void CGMRF_map::computeUncertainty_GMRF()
 {
-    // The Hessian H is the Information Matrix (Lambda) for the MAP estimate. Here, H size is (2*N,2*N)
+    // The Hessian H size is (2*N,2*N)
     // The Covariance Matrix C is the inverse of the Hessian: C = H^{-1}.
     // The uncertainties (variances) are the diagonal elements of C.
-
     try
     {
+        if (estimateTiming) stdTimer.start(); // Start Timer for Uncertainty computation        
+        
         size_t matrix_size = Hsparse.rows();
         if (Hsparse.cols() != matrix_size || matrix_size == 0)
         {
@@ -823,10 +862,7 @@ void CGMRF_map::computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hspar
         if (verbose)
              std::cerr << "[GMRF] Computing uncertainty for matrix H of size (" << matrix_size << "," << matrix_size << ")..." << std::endl;
 
-        // Use the same SimplicialLLT solver used for the mean computation.
-        Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;
-        solver.compute(Hsparse);
-
+        // Use the same Cholesky decomposition used for the MAP estimation
         if (solver.info() != Eigen::Success)
         {
             // Failed to factorize the matrix. The system might be ill-conditioned or singular.
@@ -862,6 +898,12 @@ void CGMRF_map::computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hspar
         
         if (verbose)
              std::cerr << "[GMRF] Uncertainty computation complete." << std::endl;
+
+        if (estimateTiming){
+            stdTimer.stop(); // Stop Timer for Uncertainty computation
+            auto std_time_ms = stdTimer.getMeanTimeMs();
+            std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
+        }
     }
     catch (std::exception& e)
     {
@@ -869,6 +911,190 @@ void CGMRF_map::computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hspar
         std::cerr << "[GMRF-computeUncertainty_GMRF] EXCEPTION: " << e.what() << std::endl;
         std::cerr << "=============================================================" << std::endl;
     }
+}
+
+
+// ----------------------------------------------------------------------
+// -------------------- LML & GRADIENT CALCULATION ----------------------
+// ----------------------------------------------------------------------
+std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
+{
+    // LML = Term1 (Fit) + Term2 (Complexity) + Term3 (Prior Certainty)
+    double T1, T2, T3;
+    Eigen::Vector4d gradientVec = Eigen::Vector4d::Zero();
+    Eigen::Vector4d lambdaVec;
+    lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
+
+    // Compute T1 (Minimum Weighted Energy) and its gradient T1_grad
+    // T1 = -0.5 * residual' * Lambda * residual
+    // T1_grad_i = -0.5 * sum_k (residual_k^2 * E_i(k,k))
+    
+    // We need the squared residual for each constraint, grouped by lambda type
+    double r_sq_obs = 0.0;
+    double r_sq_reg = 0.0;
+    double r_sq_flux = 0.0;
+    double r_sq_obst = 0.0;
+    
+    size_t count = 0;
+    // Prior factors (first nPriorFactors rows)
+    for (const auto& entry : factor_types) 
+    {
+        double r_sq = residual(entry.first) * residual(entry.first);
+        switch (entry.second) {
+            case FactorType::Regularization: r_sq_reg += r_sq; break;
+            case FactorType::FluxConservation: r_sq_flux += r_sq; break;
+            case FactorType::Obstacle: r_sq_obst += r_sq; break;
+            default: break; // Should not happen
+        }
+        count = entry.first;
+    }
+    // Observation factors (rows nPriorFactors to nFactors-1)
+    for (size_t i = nPriorFactors; i < nFactors; ++i) {
+        r_sq_obs += residual(i) * residual(i);
+    }
+    
+    // Calculate T1 value (Note: The Lambda multiplication is handled by the group sums)
+    T1 = -0.5 * (lambdaObservations * r_sq_obs + lambdaPrior_reg * r_sq_reg + 
+                 lambdaPrior_flux_conservation * r_sq_flux + lambdaPrior_obstacles * r_sq_obst);
+                 
+    // Calculate T1 gradient components (order: [0]Obs, [1]Reg, [2]Flux, [3]Obstacle)
+    gradientVec(0) += -0.5 * r_sq_obs;
+    gradientVec(1) += -0.5 * r_sq_reg;
+    gradientVec(2) += -0.5 * r_sq_flux;
+    gradientVec(3) += -0.5 * r_sq_obst;
+
+
+    // 3. Compute T2 (Complexity Penalty) and its gradient T2_grad
+    // T2 = -0.5 * log(|H|)
+    // T2_grad_i = -0.5 * Tr(H^-1 * J' * E_i * J)
+
+    // T2 Value: Use the Cholesky factorization (H = L L^T). |H| = prod(L_ii^2). log(|H|) = 2 * sum(log(L_ii)).
+    double log_det_H_sum = 0.0;
+    
+    // Get the actual sparse matrix from the TriangularView (L factor)
+    const auto& L_factor = solver.matrixL().nestedExpression();
+    
+    // Loop over the columns (or rows, since it's a view of a sparse matrix)
+    for (int j = 0; j < L_factor.outerSize(); ++j) {
+        // Iterate over the non-zero elements in the current column (j)
+        for (Eigen::SparseMatrix<double>::InnerIterator it(L_factor, j); it; ++it) {
+            if (it.row() == j) {
+                // Found the diagonal element L_j,j. Log(|H|) = 2 * sum(log(L_j,j))
+                log_det_H_sum += std::log(it.value());
+                break; 
+            }
+        }
+    }
+    
+    T2 = -1.0 * log_det_H_sum;  // Since log|H| = 2 * sum(log|Lii|)
+
+    // T2 Gradient (Complexity Term) - Using Diagonal Approximation for Trace
+    // Tr(H^-1 * J' * E_i * J) ~ sum_k ( (J' * E_i * J)_k,k * (H^-1)_k,k )
+    // Since (H^-1)_k,k is H_diag_inv(k), we use that.
+    
+    // We need the diagonal of J' * E_i * J.
+    // J' * E_i * J is a sparse matrix, so we compute the diagonal directly.
+    
+    Eigen::VectorXd J_E_J_diag = Eigen::VectorXd::Zero(Hsparse.rows());
+    
+    // The matrix J'*E_i*J is proportional to the Hessian H, but only using the factors weighted by lambda_i
+    // J' * E_i * J = J' * (Lambda_i / lambda_i) * J = H_i / lambda_i
+    
+    // To implement J'*E_i*J for each i, we need to efficiently extract the Hessian contribution from J'*Lambda*J
+    // The easiest way is to compute the diagonal of J'*E_i*J:
+    // (J' * E_i * J)_k,k = sum_l (J_l,k^2 * E_i(l,l)) = sum_{l in constraints_i} J_l,k^2
+    
+    // Create a boolean mask for each factor type (e.g., E_obs, E_reg, etc.)
+    std::vector<bool> is_obs_factor(nFactors, false);
+    std::vector<bool> is_reg_factor(nFactors, false);
+    std::vector<bool> is_flux_factor(nFactors, false);
+    std::vector<bool> is_obst_factor(nFactors, false);
+
+    for (const auto& entry : factor_types) {
+        if (entry.second == FactorType::Regularization) is_reg_factor[entry.first] = true;
+        if (entry.second == FactorType::FluxConservation) is_flux_factor[entry.first] = true;
+        if (entry.second == FactorType::Obstacle) is_obst_factor[entry.first] = true;
+    }
+    for (size_t i = nPriorFactors; i < nFactors; ++i) {
+        is_obs_factor[i] = true;
+    }
+    
+
+    // Compute the diagonal of H^-1 (required for LML gradient approximation)
+    Eigen::VectorXd H_diag_inv(Hsparse.rows());
+    for (int j = 0; j < Hsparse.rows(); ++j) {
+        Eigen::VectorXd e_j = Eigen::VectorXd::Zero(Hsparse.rows());
+        e_j(j) = 1.0;
+        H_diag_inv(j) = solver.solve(e_j)(j);
+    }
+
+    // Iterate over the columns of JsparseT to compute (J' * E_i * J)_k,k
+    auto compute_trace_term = [&](const std::vector<bool>& factor_mask) -> double {
+        double trace_term = 0.0;
+        
+        // Loop over the state dimensions (k)
+        for (int k = 0; k < Hsparse.rows(); ++k) {
+            // Compute (J' * E_i * J)_k,k = sum_{l in constraints_i} J_l,k^2
+            double J_E_J_diag_k = 0.0;
+            
+            // Loop over J rows (l) for column k
+            for (Eigen::SparseMatrix<double>::InnerIterator it(Jsparse, k); it; ++it) {
+                size_t row_idx = it.row();
+                if (row_idx < nFactors && factor_mask[row_idx]) {
+                    J_E_J_diag_k += it.value() * it.value();
+                }
+            }
+            
+            // Apply the diagonal approximation: Tr(A H^-1) ~ sum_k A_k,k * (H^-1)_k,k
+            trace_term += J_E_J_diag_k * H_diag_inv(k);
+        }
+        return trace_term;
+    };
+    
+    double trace_obs  = compute_trace_term(is_obs_factor);
+    double trace_reg  = compute_trace_term(is_reg_factor);
+    double trace_flux = compute_trace_term(is_flux_factor);
+    double trace_obst = compute_trace_term(is_obst_factor);
+    
+    // Apply Term 2 gradient: -0.5 * Tr(...)
+    gradientVec(0) += -0.5 * trace_obs;
+    gradientVec(1) += -0.5 * trace_reg;
+    gradientVec(2) += -0.5 * trace_flux;
+    gradientVec(3) += -0.5 * trace_obst;
+
+    
+    // 4. Compute T3 (Prior Certainty) and its gradient T3_grad
+    // T3 = 0.5 * log(|Lambda|)
+    // T3_grad_i = 0.5 * N_i / lambda_i
+    
+    // N_i: number of factors for each lambda type
+    int N_obs = nObsFactors;
+    int N_reg = 0;
+    int N_flux = 0;
+    int N_obst = 0;
+    for (const auto& entry : factor_types) {
+        if (entry.second == FactorType::Regularization) N_reg++;
+        if (entry.second == FactorType::FluxConservation) N_flux++;
+        if (entry.second == FactorType::Obstacle) N_obst++;
+    }
+    
+    // T3 Value: log(|Lambda|) = sum_i (N_i * log(lambda_i))
+    double log_det_Lambda = N_obs * std::log(lambdaObservations) + 
+                            N_reg * std::log(lambdaPrior_reg) + 
+                            N_flux * std::log(lambdaPrior_flux_conservation) + 
+                            N_obst * std::log(lambdaPrior_obstacles);
+    T3 = 0.5 * log_det_Lambda;
+    
+    // T3 Gradient
+    gradientVec(0) += 0.5 * N_obs / lambdaObservations;
+    gradientVec(1) += 0.5 * N_reg / lambdaPrior_reg;
+    gradientVec(2) += 0.5 * N_flux / lambdaPrior_flux_conservation;
+    gradientVec(3) += 0.5 * N_obst / lambdaPrior_obstacles;
+    
+    // Final LML (Term 1 + Term 2 + Term 3) - Ignore the constant C
+    double LML = T1 + T2 + T3;
+
+    return {LML, gradientVec};
 }
 
 

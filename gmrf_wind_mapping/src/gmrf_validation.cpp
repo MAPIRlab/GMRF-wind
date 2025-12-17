@@ -62,8 +62,21 @@ Cvalgt::Cvalgt()
     // 3. Read Ground-Truth Wind Map
     ReadGroundTruthWindMap(cfdFilePath);
 
-    // 4. Simulate some observations (for testing)
-    SimulateWindObservations();    
+    // 4. Simulate K fixed observations (for testing)
+    SimulateWindObservations();
+
+    // 5. Initialize metrics file
+    metrics_filename = "gmrf_validation_metrics_lambda_flux.csv";
+    std::ofstream metrics_file;
+    metrics_file.open(metrics_filename, std::ios_base::app); // append mode
+    metrics_file << "GMRF_lambdaPrior_reg,"     // regularization
+                 << "GMRF_lambdaPrior_flux,"    // mass conservation
+                 << "GMRF_lambdaPrior_obs,"     // obstacles
+                 << "GMRF_lambdaPrior_mea,"     // measurements
+                 << "NRMSE,"
+                 << "NCosSim,"
+                 << "NLL\n";
+    metrics_file.close();
 }
 
 
@@ -156,7 +169,8 @@ void Cvalgt::initialize()
                                         cell_size, 
                                         GMRF_lambdaPrior_reg, 
                                         GMRF_lambdaPrior_mass_conservation,
-                                        GMRF_lambdaPrior_obstacles, 
+                                        GMRF_lambdaPrior_obstacles,
+                                        GMRF_lambdaObs,
                                         verbose,
                                         true // estimateTiming
                                         );
@@ -352,6 +366,10 @@ void Cvalgt::SimulateWindObservations()
     double N = dimensions.x()*dimensions.y() - 1;
     std::uniform_int_distribution<> distrib(0, N);
     
+    // Clear previous observations
+    gmrf_map->clearObservations_GMRF();
+
+    // Add N random observations from the GT map
     size_t N_obs = N/10;
     for (size_t i = 0; i < N_obs; ++i)
     {
@@ -390,9 +408,31 @@ void Cvalgt::publishMaps()
     wind_std_array_pub->publish(wind_std_array);
 }
 
+void Cvalgt::update_parameters()
+{
+    // 1. Hacer una pasada por cada parámetro para ver sus tendencias y entender un poco como afecta al NLL
+    // 2. Fuerza Bruta??
+    // 3. Idealmente un gradiente o técnica más inteligente para optimizar parámetros.
+    
+    // Read current parameters
+    GMRF_lambdaPrior_reg = this->get_parameter("GMRF_lambdaPrior_reg").as_double();
+    GMRF_lambdaPrior_mass_conservation = this->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_obstacles = this->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+    GMRF_lambdaObs = this->get_parameter("GMRF_lambdaObs").as_double();
+
+    // Update
+    std::vector<rclcpp::Parameter> new_parameters{
+        rclcpp::Parameter("GMRF_lambdaPrior_reg", GMRF_lambdaPrior_reg),
+        rclcpp::Parameter("GMRF_lambdaPrior_mass_conservation", GMRF_lambdaPrior_mass_conservation+=1),
+        rclcpp::Parameter("GMRF_lambdaPrior_obstacles", GMRF_lambdaPrior_obstacles),
+        rclcpp::Parameter("GMRF_lambdaObs", GMRF_lambdaObs)
+    };
+    this->set_parameters(new_parameters);    
+}
 
 void Cvalgt::update()
 {
+    /*
     // Update Lambda parameters (read parameter server)
     GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
     GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
@@ -400,9 +440,16 @@ void Cvalgt::update()
     GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
     GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
     gmrf_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
+    */
+    
+    // Simple MAP estimation (with current lambdas)
+    // gmrf_map->MAP_estimation_GMRF();
 
-    // Update GMRF estimation
-     gmrf_map->updateMapEstimation_GMRF(GMRF_lambdaObsLoss);
+    // Iterative process for MAP and Lambda optimization
+    gmrf_map->optimize_GMRF(true, 1000, 0.05, 0.001);
+
+    // Estimate uncertainty on final map
+    gmrf_map->computeUncertainty_GMRF();
 }
 
 
@@ -548,6 +595,18 @@ void Cvalgt::compute_performance_metrics()
     // NLL Map Metric
     double NLL_metric = sum_NLL / N;
     RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLL = %.2f", NLL_metric);
+
+    // Save metrics to file
+    std::ofstream metrics_file;
+    metrics_file.open(metrics_filename, std::ios_base::app); // append mode
+    metrics_file << GMRF_lambdaPrior_reg << ","
+                 << GMRF_lambdaPrior_mass_conservation << ","
+                 << GMRF_lambdaPrior_obstacles << ","
+                 << GMRF_lambdaObs << ","
+                 << NRMSE << ","
+                 << NCosSim << ","
+                 << NLL_metric << "\n";
+    metrics_file.close();
 }
 
 
@@ -564,15 +623,17 @@ int main(int argc, char** argv)
 
     // Main loop
     RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] MAIN LOOP....");
-    rclcpp::Rate loop_rate(1.0);
+    rclcpp::Rate loop_rate(100);
 
-    while (rclcpp::ok())
+    //while (rclcpp::ok())
+    //for (size_t iter = 0; iter < 100; ++iter)
     {
         rclcpp::spin_some(my_gmrf_map);     // Callbacks & Services
 
         if (my_gmrf_map->module_init)
         {
-            // Change Lambda values (ToDo)
+            // Update Lambda values
+            //my_gmrf_map->update_parameters();
 
             // Update Estimation
             my_gmrf_map->update();

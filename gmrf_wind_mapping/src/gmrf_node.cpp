@@ -179,7 +179,8 @@ void Cgmrf::initialize()
                                         cell_size, 
                                         GMRF_lambdaPrior_reg, 
                                         GMRF_lambdaPrior_mass_conservation,
-                                        GMRF_lambdaPrior_obstacles, 
+                                        GMRF_lambdaPrior_obstacles,
+                                        GMRF_lambdaObs,
                                         verbose,
                                         true // estimateTiming
                                         );
@@ -298,7 +299,7 @@ void Cgmrf::update()
     my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
 
     // Update GMRF estimation
-     my_map->updateMapEstimation_GMRF(GMRF_lambdaObsLoss);
+     my_map->MAP_estimation_GMRF();
 }
 
 

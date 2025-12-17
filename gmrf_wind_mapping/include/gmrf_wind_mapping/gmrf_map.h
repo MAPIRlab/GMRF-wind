@@ -93,18 +93,22 @@ public:
                 double m_lambdaPrior_reg,
                 double m_lambdaPrior_mass_conservation, 
                 double m_lambdaPrior_obstacles,
+                double m_lambdaObservations,
                 bool verbose,
                 bool estimateTiming
             );
     ~CGMRF_map();
 
-    // Insert new observation
+    // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
+    void clearObservations_GMRF();
     void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles, double m_lambdaObservations);
    
-    // Solves the Least Squares linear system to determine the new values at each cell
-    void updateMapEstimation_GMRF(float lambdaObsLoss);
-    void computeUncertainty_GMRF(const Eigen::SparseMatrix<double>& Hsparse);
+    // GMRF Estimation
+    void optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold); 
+    void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
+    void computeUncertainty_GMRF();
+    std::pair<double, Eigen::Vector4d> calculate_LML_gradient();
 
     // Read estimation
     WindVector getEstimation(int index);
@@ -170,11 +174,18 @@ protected:
     // GMRF Matrices and Structures
     std::vector<Eigen::Triplet<double>> J;          // Jacobian
     std::vector<Eigen::Triplet<double>> Lambda;     // the information matrix (weights or inverse of covariances)
-    std::vector<std::pair<size_t, FactorType>> factor_types; // To keep track of the type of each factor
+    std::vector<std::pair<size_t, FactorType>> factor_types; // Is the Lambda matrix, but with the type of each factor
     std::vector<TobservationGMRF> activeObs;        // Vector with the active observations and their respective Information
+    Eigen::SparseMatrix<double> Jsparse;            // Sparse Jacobian matrix
+    Eigen::SparseMatrix<double> Hsparse;            // Sparse Information matrix (H = J' * Lambda * J)
+    Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;        // Cholesky solver for the linear system
+    Eigen::VectorXd gradient;                       // Gradient vector (G = J' * Lambda * y)
+    Eigen::VectorXd m_MAP_sol;                     // Solution vector for the linear system (m_MAP)
+    Eigen::VectorXd residual;                      // Residual vector (r = J*m_MAP_sol - y)
 
     // Util Functions
     bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
+    double getLambdaValue(FactorType type) const;
 
     int xy2idx(float x, float y) const;
     void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);

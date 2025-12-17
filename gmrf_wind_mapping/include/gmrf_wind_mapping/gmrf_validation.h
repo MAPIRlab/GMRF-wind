@@ -37,6 +37,7 @@ class Cvalgt : public rclcpp::Node
 public:
     Cvalgt();
     ~Cvalgt();
+    void update_parameters();
     void update();
     void publishMaps();
     void compute_performance_metrics();
@@ -75,4 +76,5 @@ protected:
     // Variables
     boost::mutex mutex_anemometer;
     boost::mutex mutex_position;
+    std::string metrics_filename;
 };
