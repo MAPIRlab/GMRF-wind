@@ -644,22 +644,24 @@ void CGMRF_map::optimize_GMRF(bool performLMLOptimization, int maxIterations, do
     double prevLML = -std::numeric_limits<double>::infinity();
     
     // Define the lambda vector for easy update and gradient calculation
-    // Order: [0]Obs, [1]Reg, [2]Flux, [3]Obstacle
+    // Order: [0]Observations, [1]Regularization, [2]Flux, [3]Obstacle
     Eigen::Vector4d lambdaVec;
+    lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
+    
+    // Momentum and Velocity state (for optimization)
+    Eigen::Vector4d velocity = Eigen::Vector4d::Zero();
+    double momentum = 0.9;
     Eigen::Vector4d gradientVec;
     
     for (int iter = 0; iter < maxIterations; ++iter)
     {
         if (verbose) std::cerr << "\n[LML Iteration " << iter + 1 << "]" << std::endl;
         
-        // Load current hyperparameters into vector
-        lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
-        
-        // --- 2.1 State Estimation (MAP) ---
+        // 1. State Estimation (MAP)
         // Compute MAP estimate using the current lambdas
         MAP_estimation_GMRF();
                 
-        // --- 2.2 Hyperparameter Maximization (LML & Gradient) ---
+        // 2. Hyperparameter Maximization (LML & Gradient)
         prevLML = currentLML;
         
         std::pair<double, Eigen::Vector4d> result = calculate_LML_gradient();
@@ -672,19 +674,28 @@ void CGMRF_map::optimize_GMRF(bool performLMLOptimization, int maxIterations, do
             std::cerr << "  -> Gradient: " << gradientVec.transpose() << std::endl;
         }
 
-        // --- 2.3 Check Convergence ---
+        // 3. Check Convergence
         if (iter > 0 && std::abs(currentLML - prevLML) < LML_threshold) {
             if (verbose) std::cerr << "[LML] Optimization converged. Delta LML: " << (currentLML - prevLML) << std::endl;
             break;
         }
         
-        // --- 2.4 Gradient Ascent Update (Simplified Optimizer) ---
-        lambdaVec += learningRate * gradientVec;
+        // 4. Gradient Ascent Update (Simplified Optimizer - but slow convergence)
+        //lambdaVec += learningRate * gradientVec;
+
+        // 4b. Update with Momentum & Adaptive Learning Rate (Step-Halving)
+        if (iter > 0 && currentLML < prevLML) {
+            // If LML decreased (it shouldn't in ascent), we reduce learning rate and velocity
+            learningRate *= 0.5;
+            velocity *= 0.5;
+            if (verbose) std::cerr << "  (Step-back: Reducing learning rate to " << learningRate << ")" << std::endl;
+        }
+
+        velocity = momentum * velocity + learningRate * gradientVec;
+        lambdaVec += velocity;
 
         // Apply boundary constraints (lambdas must be positive)
-        for (int i = 0; i < 4; ++i) {
-            if (lambdaVec(i) < 1e-9) lambdaVec(i) = 1e-9;
-        }
+        for (int i = 0; i < 4; ++i) lambdaVec(i) = std::max(1e-6, lambdaVec(i));
 
         // Update class members for next MAP step
         lambdaObservations = lambdaVec(0);
@@ -920,12 +931,14 @@ void CGMRF_map::computeUncertainty_GMRF()
 std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
 {
     // LML = Term1 (Fit) + Term2 (Complexity) + Term3 (Prior Certainty)
+    // ---------------------------------------------------------------
     double T1, T2, T3;
     Eigen::Vector4d gradientVec = Eigen::Vector4d::Zero();
     Eigen::Vector4d lambdaVec;
     lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
 
     // Compute T1 (Minimum Weighted Energy) and its gradient T1_grad
+    // ---------------------------------------------------------------
     // T1 = -0.5 * residual' * Lambda * residual
     // T1_grad_i = -0.5 * sum_k (residual_k^2 * E_i(k,k))
     
@@ -964,7 +977,8 @@ std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
     gradientVec(3) += -0.5 * r_sq_obst;
 
 
-    // 3. Compute T2 (Complexity Penalty) and its gradient T2_grad
+    // Compute T2 (Complexity Penalty) and its gradient T2_grad
+    // ---------------------------------------------------------------
     // T2 = -0.5 * log(|H|)
     // T2_grad_i = -0.5 * Tr(H^-1 * J' * E_i * J)
 
@@ -1063,7 +1077,8 @@ std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
     gradientVec(3) += -0.5 * trace_obst;
 
     
-    // 4. Compute T3 (Prior Certainty) and its gradient T3_grad
+    // Compute T3 (Prior Certainty) and its gradient T3_grad
+    // ---------------------------------------------------------------
     // T3 = 0.5 * log(|Lambda|)
     // T3_grad_i = 0.5 * N_i / lambda_i
     
