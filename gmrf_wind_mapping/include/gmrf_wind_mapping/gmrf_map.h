@@ -91,7 +91,7 @@ public:
     CGMRF_map(  const TOccupancyMap& oc_map, 
                 float cell_size,
                 double m_lambdaPrior_reg,
-                double m_lambdaPrior_mass_conservation, 
+                double m_lambdaPrior_flux_conservation, 
                 double m_lambdaPrior_obstacles,
                 double m_lambdaObservations,
                 bool verbose,
@@ -102,7 +102,7 @@ public:
     // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
     void clearObservations_GMRF();
-    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles, double m_lambdaObservations);
+    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles, double m_lambdaObservations);
    
     // GMRF Estimation
     void optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold); 

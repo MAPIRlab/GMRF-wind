@@ -38,7 +38,7 @@ Cvalgt::Cvalgt()
 
     // Lambda/weights for the different priors and observation factors
     GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
-    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 1.0);
+    GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
     GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 1.0);
     GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
@@ -168,7 +168,7 @@ void Cvalgt::initialize()
     gmrf_map = std::make_unique<CGMRF_map>(occMap, 
                                         cell_size, 
                                         GMRF_lambdaPrior_reg, 
-                                        GMRF_lambdaPrior_mass_conservation,
+                                        GMRF_lambdaPrior_flux_conservation,
                                         GMRF_lambdaPrior_obstacles,
                                         GMRF_lambdaObs,
                                         verbose,
@@ -416,14 +416,14 @@ void Cvalgt::update_parameters()
     
     // Read current parameters
     GMRF_lambdaPrior_reg = this->get_parameter("GMRF_lambdaPrior_reg").as_double();
-    GMRF_lambdaPrior_mass_conservation = this->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_flux_conservation = this->get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
     GMRF_lambdaPrior_obstacles = this->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
     GMRF_lambdaObs = this->get_parameter("GMRF_lambdaObs").as_double();
 
     // Update
     std::vector<rclcpp::Parameter> new_parameters{
         rclcpp::Parameter("GMRF_lambdaPrior_reg", GMRF_lambdaPrior_reg),
-        rclcpp::Parameter("GMRF_lambdaPrior_mass_conservation", GMRF_lambdaPrior_mass_conservation+=1),
+        rclcpp::Parameter("GMRF_lambdaPrior_flux_conservation", GMRF_lambdaPrior_flux_conservation+=1),
         rclcpp::Parameter("GMRF_lambdaPrior_obstacles", GMRF_lambdaPrior_obstacles),
         rclcpp::Parameter("GMRF_lambdaObs", GMRF_lambdaObs)
     };
@@ -435,18 +435,19 @@ void Cvalgt::update()
     /*
     // Update Lambda parameters (read parameter server)
     GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
-    GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_flux_conservation = get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
     GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
     GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
-    gmrf_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
+    gmrf_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
     */
     
     // Simple MAP estimation (with current lambdas)
     // gmrf_map->MAP_estimation_GMRF();
 
     // Iterative process for MAP and Lambda optimization
-    gmrf_map->optimize_GMRF(true, 1000, 0.05, 0.001);
+    // optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
+    gmrf_map->optimize_GMRF(true, 1000, 0.1, 0.1);
 
     // Estimate uncertainty on final map
     gmrf_map->computeUncertainty_GMRF();
@@ -600,7 +601,7 @@ void Cvalgt::compute_performance_metrics()
     std::ofstream metrics_file;
     metrics_file.open(metrics_filename, std::ios_base::app); // append mode
     metrics_file << GMRF_lambdaPrior_reg << ","
-                 << GMRF_lambdaPrior_mass_conservation << ","
+                 << GMRF_lambdaPrior_flux_conservation << ","
                  << GMRF_lambdaPrior_obstacles << ","
                  << GMRF_lambdaObs << ","
                  << NRMSE << ","

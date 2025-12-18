@@ -32,8 +32,8 @@ def launch_setup(context, *args, **kwargs):
             {"verbose": False},                               # Verbose mode for debugging
             {"visualize_gmrf": True},                         # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"GMRF_lambdaPrior_reg": 1.0},                      # Regularization -> neighbour cells have similar wind vectors
-            {"GMRF_lambdaPrior_mass_conservation": 1.0},     # Mass conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_reg": 1.0},                    # Regularization -> neighbour cells have similar wind vectors
+            {"GMRF_lambdaPrior_flux_conservation": 1.0},      # Flux conservation law -> divergence of the wind field is zero
             {"GMRF_lambdaPrior_obstacles": 1.0},              # Obstacles --> cells close to obstacles has only tangencial wind
             {"GMRF_lambdaObs": 1.0},                          # The initial weight (Lambda) of each observation
             {"GMRF_lambdaObsLoss": 0.0}                       # The loss of information (Lambda) of the observations with each iteration

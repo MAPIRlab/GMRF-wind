@@ -45,7 +45,7 @@ Cgmrf::Cgmrf()
 
     // Lambda/weights for the different priors and observation factors
     GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
-    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 1.0);
+    GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
     GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 1.0);
     GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
@@ -178,7 +178,7 @@ void Cgmrf::initialize()
     my_map = std::make_unique<CGMRF_map>(occMap, 
                                         cell_size, 
                                         GMRF_lambdaPrior_reg, 
-                                        GMRF_lambdaPrior_mass_conservation,
+                                        GMRF_lambdaPrior_flux_conservation,
                                         GMRF_lambdaPrior_obstacles,
                                         GMRF_lambdaObs,
                                         verbose,
@@ -292,11 +292,11 @@ void Cgmrf::update()
 {
     // Update Lambda parameters (read parameter server)
     GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
-    GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_flux_conservation = get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
     GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
     GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
-    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
+    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
 
     // Update GMRF estimation
      my_map->MAP_estimation_GMRF();
