@@ -66,16 +66,16 @@ Cvalgt::Cvalgt()
     SimulateWindObservations();
 
     // 5. Initialize metrics file
-    metrics_filename = "gmrf_validation_metrics_lambda_flux.csv";
+    metrics_filename = "gmrf_evaluation_metrics.csv";
     std::ofstream metrics_file;
     metrics_file.open(metrics_filename, std::ios_base::app); // append mode
     metrics_file << "GMRF_lambdaPrior_reg,"     // regularization
                  << "GMRF_lambdaPrior_flux,"    // mass conservation
                  << "GMRF_lambdaPrior_obs,"     // obstacles
                  << "GMRF_lambdaPrior_mea,"     // measurements
-                 << "NRMSE,"
-                 << "NCosSim,"
-                 << "NLL\n";
+                 << "RMSE,"
+                 << "AAE,"
+                 << "NLPD\n";
     metrics_file.close();
 }
 
@@ -440,25 +440,33 @@ void Cvalgt::update()
     GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
     GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
     gmrf_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
-    */
-    
-    // Simple MAP estimation (with current lambdas)
-    // gmrf_map->MAP_estimation_GMRF();
+    */     
 
-    // Iterative process for MAP and Lambda optimization
-    // optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
-    gmrf_map->optimize_GMRF(true, 1000, 0.1, 0.1);
+    // Optimize Lambda hyperparameters (Log Marginal Likelihood maximization)
+    // optimize_LML(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
+    gmrf_map->optimize_LML(true, 1, 0.001, 0.1);
 
-    // Estimate uncertainty on final map
+    // MAP estimation (with current lambdas)
+    gmrf_map->MAP_estimation_GMRF();
+
+    // Estimate uncertainty on final MAP estimation
     gmrf_map->computeUncertainty_GMRF();
 }
 
 
 void Cvalgt::compute_performance_metrics()
 {
+    RCLCPP_INFO(get_logger(), "[Cvalgt] Computing performance metrics comparing GMRF estimation with Ground-Truth map.");
     // Compare current GMRF estimation with GT map
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     size_t N = dimensions.x()*dimensions.y();
+    size_t N2 = gt_map.size();
+    RCLCPP_INFO(get_logger(), "[gmrf-validation] Map size: GMRF=%zu cells, GT=%zu cells", N, N2);
+    if (N != N2)
+    {
+        RCLCPP_ERROR(get_logger(), "[gmrf-validation] ERROR: GMRF map size and GT map size do not match!");
+        return;
+    }
 
     using visualization_msgs::msg::Marker;
     Marker metric_marker;
@@ -479,16 +487,18 @@ void Cvalgt::compute_performance_metrics()
     metric_marker.colors.reserve(N);
 
     // METRICS
-    double sum_cosine_sim = 0.0;        // Normalized Cosine Similarity (0-1)
-    double sum_squared_error = 0.0;     // Normalized RMSE (0-inf)
+    double sum_AE = 0.0;                // Angular Error (0-1)
+    double sum_squared_error = 0.0;     // for RMSE (0-inf)
     double sum_gt_magnitudes = 0.0;     // To normalize the RMSE
-    double sum_NLL = 0.0;               // Normalized Negative Log-Likelihood (NLL)
+    double sum_NLPD = 0.0;              // Negative Log-Predictive Density (NLPD)
 
     for (size_t i = 0; i < N; ++i)
     {
         // Skip occupied cells
         if (gmrf_map->is_cell_free(i))
         {
+            //RCLCPP_INFO(this->get_logger(), "[gmrf-validation] LOOP i=%zu/%zu", i, N);
+
             // Get GMRF estimation at cell i
             WindVector est_wind = gmrf_map->getEstimation(i);
             double est_x = est_wind.module * cos(est_wind.direction);
@@ -505,9 +515,9 @@ void Cvalgt::compute_performance_metrics()
             double gt_y = gt_wind.y;
             double gt_module = sqrt(pow(gt_wind.x,2) + pow(gt_wind.y,2));
             double gt_direction = atan2(gt_wind.y, gt_wind.x);
-
+            
             // ===================================================
-            // METRIC1: Normalized Cosine Similarity (only direction)
+            // METRIC1: Angular Error (only direction) [0,1]
             // ===================================================
             // 1. Calculate the dot product
             double dot_product = est_x * gt_x + est_y * gt_y;
@@ -526,17 +536,14 @@ void Cvalgt::compute_performance_metrics()
             double angle_radians = std::acos(cosine_similarity);
 
             // 5. Normalize the angle from [0, pi] range to [0, 1] range
-            // The maximum possible angle (180 degrees or pi radians) becomes 1.0
-            // The minimum possible angle (0 degrees) becomes 0.0
-            double normalized_csm = angle_radians / M_PI;
+            double AE = angle_radians / M_PI;
 
             // 6. Accumulate
-            sum_cosine_sim += normalized_csm;
+            sum_AE += AE;
 
-
-            //===================================
-            // METRIC2: Normalized RMSE
-            //===================================
+            // ===================================================
+            // METRIC2: RMSE (only module) [0,inf]
+            // ===================================================
             double diff_x = gt_x - est_x;
             double diff_y = gt_y - est_y;
             double squared_error = (diff_x * diff_x + diff_y * diff_y);
@@ -546,19 +553,16 @@ void Cvalgt::compute_performance_metrics()
             sum_gt_magnitudes += std::sqrt(gt_x * gt_x + gt_y * gt_y);
             
 
-            //===============================
-            // METRIC3: Negative Log-Likelihood (NLL)
-            // Considers the uncertainty of the estimation
-            //===============================
+            // ===================================================
+            // METRIC3: NLPD - Negative Log-Predictive Density (uncertainty aware) [-inf,inf]
+            // ===================================================
             double mahalanobis_distance_squared = (pow(gt_x - est_x, 2) / (est_stdX * est_stdX + 1e-6)) +
                                                   (pow(gt_y - est_y, 2) / (est_stdY * est_stdY + 1e-6));
 
-            double NLL = 0.5 * mahalanobis_distance_squared + std::log(est_stdX) + std::log(est_stdY);
-            sum_NLL += NLL;
-
+            double NLPD = 0.5 * mahalanobis_distance_squared + std::log(est_stdX) + std::log(est_stdY) + std::log(2 * M_PI);
+            
             // Accumulate
-            sum_NLL += NLL;
-
+            sum_NLPD += NLPD;
 
             // ===============================
             // VISUALIZE METRIC
@@ -576,7 +580,7 @@ void Cvalgt::compute_performance_metrics()
             
             std_msgs::msg::ColorRGBA color;
             // color -> must normalize to [0-199]
-            Utils::get_arrow_color(NLL , 1, color.r, color.g, color.b);
+            Utils::get_arrow_color(AE , 1, color.r, color.g, color.b);
             color.a = 1.0;       // transparency
             metric_marker.colors.push_back(color);
         }
@@ -584,29 +588,30 @@ void Cvalgt::compute_performance_metrics()
     metric_pub->publish(metric_marker);
 
 
-    // NRMSE Map Metric
-    double rmse = std::sqrt(sum_squared_error / N);
-    double NRMSE = rmse / ( sum_gt_magnitudes / N);
-    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] NRMSE = %.2f", NRMSE);
+    // RMSE & NRMSE
+    double RMSE = std::sqrt(sum_squared_error / N);
+    double NRMSE = RMSE / ( sum_gt_magnitudes / N);
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] RMSE (m/s)= %.2f", RMSE);
 
-    // NCosSim Map Metric
-    double NCosSim = sum_cosine_sim / N;
-    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average Cosine Similarity = %.2f", NCosSim);
+    // Average Angular Error
+    double AAE = sum_AE / N;
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average Angular Error (rad) = %.2f", AAE);
 
-    // NLL Map Metric
-    double NLL_metric = sum_NLL / N;
-    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLL = %.2f", NLL_metric);
+    // Average NLPD
+    double ANLPD = sum_NLPD / N;
+    RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLPD = %.2f", ANLPD);
 
     // Save metrics to file
+    gmrf_map->read_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
     std::ofstream metrics_file;
     metrics_file.open(metrics_filename, std::ios_base::app); // append mode
     metrics_file << GMRF_lambdaPrior_reg << ","
                  << GMRF_lambdaPrior_flux_conservation << ","
                  << GMRF_lambdaPrior_obstacles << ","
                  << GMRF_lambdaObs << ","
-                 << NRMSE << ","
-                 << NCosSim << ","
-                 << NLL_metric << "\n";
+                 << RMSE << ","
+                 << AAE << ","
+                 << ANLPD << "\n";
     metrics_file.close();
 }
 
@@ -626,7 +631,7 @@ int main(int argc, char** argv)
     RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] MAIN LOOP....");
     rclcpp::Rate loop_rate(100);
 
-    //while (rclcpp::ok())
+    while (rclcpp::ok())
     //for (size_t iter = 0; iter < 100; ++iter)
     {
         rclcpp::spin_some(my_gmrf_map);     // Callbacks & Services
@@ -636,7 +641,7 @@ int main(int argc, char** argv)
             // Update Lambda values
             //my_gmrf_map->update_parameters();
 
-            // Update Estimation
+            // Update Estimation + Uncertainty
             my_gmrf_map->update();
            
             // Publish Map as markers (RVIZ2)

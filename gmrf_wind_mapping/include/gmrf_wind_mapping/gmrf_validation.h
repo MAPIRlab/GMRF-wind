@@ -41,13 +41,13 @@ public:
     void update();
     void publishMaps();
     void compute_performance_metrics();
+    void SimulateWindObservations();
     bool module_init;
     bool verbose;
     bool visualize_gmrf;
 protected:
     inline void ReadMap();
     inline void ReadGroundTruthWindMap(const std::string& filename);
-    void SimulateWindObservations();
     void initialize();
 
     // Publishers (visualization)
