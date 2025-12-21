@@ -410,6 +410,14 @@ void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
     lambdaObservations = m_lambdaObservations;
 }
 
+void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles, double &m_lambdaObservations)
+{
+    m_lambdaPrior_reg = lambdaPrior_reg;
+    m_lambdaPrior_flux_conservation = lambdaPrior_flux_conservation;
+    m_lambdaPrior_obstacles = lambdaPrior_obstacles;
+    m_lambdaObservations = lambdaObservations;
+}
+
 /*---------------------------------------------------------------
                         Cell index transformations
   ---------------------------------------------------------------*/
@@ -628,7 +636,7 @@ void CGMRF_map::clearObservations_GMRF()
 // ----------------------------------------------------------------------
 // ------------ LOG MARGINAL LIKELIHOOD OPTIMIZATION LOOP ---------------
 // ----------------------------------------------------------------------
-void CGMRF_map::optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
+void CGMRF_map::optimize_LML(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
 {
     if (verbose) std::cerr << "[GMRF] Starting GMRF Estimation..." << (performLMLOptimization ? " (LML Optimization Active)" : " (Fixed Hyperparameters)") << std::endl;
     
@@ -668,6 +676,13 @@ void CGMRF_map::optimize_GMRF(bool performLMLOptimization, int maxIterations, do
         currentLML = result.first;
         gradientVec = result.second;
         
+        // Control gradient explosion
+        for (int i = 0; i < 4; ++i) {
+            if (std::abs(gradientVec(i)) > 1e2) {
+                gradientVec(i) = (gradientVec(i) > 0 ? 1e2 : -1e2);
+            }
+        }
+
         if (verbose) {
             std::cerr << "  -> LML: " << currentLML << std::endl;
             std::cerr << "  -> Lambdas: " << lambdaVec.transpose() << std::endl;
