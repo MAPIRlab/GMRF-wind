@@ -103,9 +103,10 @@ public:
     void insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs);
     void clearObservations_GMRF();
     void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles, double m_lambdaObservations);
+    void read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles, double &m_lambdaObservations);
    
     // GMRF Estimation
-    void optimize_GMRF(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold); 
+    void optimize_LML(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold); 
     void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
     void computeUncertainty_GMRF();
     std::pair<double, Eigen::Vector4d> calculate_LML_gradient();
