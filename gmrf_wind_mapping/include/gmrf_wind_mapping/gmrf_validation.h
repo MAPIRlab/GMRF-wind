@@ -19,6 +19,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/math/constants/constants.hpp>
 #include <angles/angles.h>
+#include "ceres/ceres.h"
 
 
 // Core GMRF map
@@ -31,20 +32,48 @@ struct WindVectorXY
     double y;
 };
 
+
+
 // Cvalgt class (ROS2 Node)
 class Cvalgt : public rclcpp::Node
 {
 public:
     Cvalgt();
     ~Cvalgt();
-    void update_parameters();
+
     void update();
     void publishMaps();
-    void compute_performance_metrics();
-    void SimulateWindObservations();
+    std::array<double, 3> compute_performance_metrics() const;
+    void SimulateWindObservations(size_t N_obs);
+    void update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs);
+    void read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles, double &lambda_obs);
     bool module_init;
     bool verbose;
     bool visualize_gmrf;
+
+    // CERES: The cost function for NLPD optimization
+    template <typename T>
+    bool evaluate_cost(const T* const params, T* residual) const
+    {
+        // 1. Update GMRF lambdas (Reg, Flux, Obstacles, Observations)
+        gmrf_map->update_lambdas( static_cast<double>(params[0]),
+                                  static_cast<double>(params[1]),
+                                  static_cast<double>(params[2]),
+                                  static_cast<double>(params[3]) );
+        
+        // 2. Run MAP estimation and uncertainty computation
+        gmrf_map->MAP_estimation_GMRF();
+        gmrf_map->computeUncertainty_GMRF();
+
+        // 3. Compute performance metrics (AAE, RMSE, NLPD)
+        std::array<double, 3> metrics = this->compute_performance_metrics();
+        double ANLPD = metrics[2]; // NLPD is the third element
+
+        // 4. Return Average NLPD as residual (we optimize for NLPD minimization)
+        residual[0] = static_cast<T>(ANLPD);
+        return true;
+    }
+
 protected:
     inline void ReadMap();
     inline void ReadGroundTruthWindMap(const std::string& filename);
@@ -71,10 +100,22 @@ protected:
     double GMRF_lambdaPrior_flux_conservation; // Weight for flux conservation law prior
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
     double GMRF_lambdaObs;     // [GMRF model] The initial information (Lambda) of each observation (this information will decrease with time)
-    double GMRF_lambdaObsLoss; // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
-
+    
     // Variables
     boost::mutex mutex_anemometer;
     boost::mutex mutex_position;
     std::string metrics_filename;
+};
+
+// CERES Cost Functor for NLPD optimization
+struct CostFunctor
+{
+    Cvalgt* gmrf_validation_node;
+    CostFunctor(Cvalgt* instance) : gmrf_validation_node(instance) {}
+    
+    template <typename T>
+    bool operator()(const T* const params, T* residual) const {
+        // Delegate the work to the class member function
+        return gmrf_validation_node->evaluate_cost(params, residual);
+    }
 };

@@ -24,14 +24,14 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_empty_room", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
             {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_empty_room", "wind_simulations", "dynamic", "wind_at_cell_centers_1.csv")},                                 # Path to a CSV file containing the CFD ground-truth wind data
-            {"cell_size": 0.3},                              # Size of each cell in the GMRF grid (meters)
-            {"verbose": True},                               # Verbose mode for debugging
-            {"visualize_gmrf": True},                         # Visualize the GMRF wind field in RViz
+            {"cell_size": 0.3},                               # Size of each cell in the GMRF grid (meters)
+            {"verbose": False},                               # Verbose mode for debugging
+            {"visualize_gmrf": True},                        # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"GMRF_lambdaObs": 20.0},                          # The initial weight (Lambda) of each observation
-            {"GMRF_lambdaPrior_reg": 2015.0},                   # Regularization -> neighbour cells have similar wind vectors
-            {"GMRF_lambdaPrior_flux_conservation": 650.0},     # Flux conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 1007.0},             # Obstacles --> cells close to obstacles has only tangencial wind
+            {"GMRF_lambdaObs": 0.01},                         # The initial weight (Lambda) of each observation            
+            {"GMRF_lambdaPrior_flux_conservation": 0.01},     # Flux conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_reg": 0.01},                   # Regularization -> neighbour cells have similar wind vectors
+            {"GMRF_lambdaPrior_obstacles": 0.01},             # Obstacles --> cells close to obstacles has only tangencial wind
         ]
     )
 

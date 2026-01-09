@@ -41,8 +41,7 @@ Cvalgt::Cvalgt()
     GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
     GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 1.0);
-    GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
-    
+
     // Publishers
     //----------------------------------
     wind_array_pub = create_publisher<visualization_msgs::msg::MarkerArray>("wind_array_pub", 1);
@@ -63,7 +62,7 @@ Cvalgt::Cvalgt()
     ReadGroundTruthWindMap(cfdFilePath);
 
     // 4. Simulate K fixed observations (for testing)
-    SimulateWindObservations();
+    //SimulateWindObservations();
 
     // 5. Initialize metrics file
     metrics_filename = "gmrf_evaluation_metrics.csv";
@@ -176,11 +175,6 @@ void Cvalgt::initialize()
                                         );
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
     module_init = true;
-
-    // DEBUG - ADD SOME RANDOM OBSERVATIONS
-    //      insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs)
-    gmrf_map->insertObservation_GMRF(12.0, 3.14, 1.15, 1.8, 100.0);
-    //gmrf_map->insertObservation_GMRF(12.0, 3.14, 1.15, 3.0, 100.0);
 }
 
 
@@ -352,7 +346,7 @@ inline void Cvalgt::ReadGroundTruthWindMap(const std::string& filename)
 }
 
 
-void Cvalgt::SimulateWindObservations()
+void Cvalgt::SimulateWindObservations(size_t N_obs)
 {
     // 1. Setup Random Number Generator (RNG)
     // std::random_device provides a non-deterministic seed (best practice)
@@ -370,7 +364,6 @@ void Cvalgt::SimulateWindObservations()
     gmrf_map->clearObservations_GMRF();
 
     // Add N random observations from the GT map
-    size_t N_obs = N/10;
     for (size_t i = 0; i < N_obs; ++i)
     {
         // 3. Generate and Return the Random Number
@@ -408,27 +401,7 @@ void Cvalgt::publishMaps()
     wind_std_array_pub->publish(wind_std_array);
 }
 
-void Cvalgt::update_parameters()
-{
-    // 1. Hacer una pasada por cada parámetro para ver sus tendencias y entender un poco como afecta al NLL
-    // 2. Fuerza Bruta??
-    // 3. Idealmente un gradiente o técnica más inteligente para optimizar parámetros.
-    
-    // Read current parameters
-    GMRF_lambdaPrior_reg = this->get_parameter("GMRF_lambdaPrior_reg").as_double();
-    GMRF_lambdaPrior_flux_conservation = this->get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
-    GMRF_lambdaPrior_obstacles = this->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
-    GMRF_lambdaObs = this->get_parameter("GMRF_lambdaObs").as_double();
 
-    // Update
-    std::vector<rclcpp::Parameter> new_parameters{
-        rclcpp::Parameter("GMRF_lambdaPrior_reg", GMRF_lambdaPrior_reg),
-        rclcpp::Parameter("GMRF_lambdaPrior_flux_conservation", GMRF_lambdaPrior_flux_conservation+=1),
-        rclcpp::Parameter("GMRF_lambdaPrior_obstacles", GMRF_lambdaPrior_obstacles),
-        rclcpp::Parameter("GMRF_lambdaObs", GMRF_lambdaObs)
-    };
-    this->set_parameters(new_parameters);    
-}
 
 void Cvalgt::update()
 {
@@ -444,7 +417,7 @@ void Cvalgt::update()
 
     // Optimize Lambda hyperparameters (Log Marginal Likelihood maximization)
     // optimize_LML(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
-    gmrf_map->optimize_LML(true, 1, 0.001, 0.1);
+    // gmrf_map->optimize_LML(true, 1, 0.001, 0.1);
 
     // MAP estimation (with current lambdas)
     gmrf_map->MAP_estimation_GMRF();
@@ -454,43 +427,44 @@ void Cvalgt::update()
 }
 
 
-void Cvalgt::compute_performance_metrics()
+std::array<double,3> Cvalgt::compute_performance_metrics() const
 {
-    RCLCPP_INFO(get_logger(), "[Cvalgt] Computing performance metrics comparing GMRF estimation with Ground-Truth map.");
     // Compare current GMRF estimation with GT map
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     size_t N = dimensions.x()*dimensions.y();
     size_t N2 = gt_map.size();
-    RCLCPP_INFO(get_logger(), "[gmrf-validation] Map size: GMRF=%zu cells, GT=%zu cells", N, N2);
+    //RCLCPP_INFO(get_logger(), "[gmrf-validation] Map size: GMRF=%zu cells, GT=%zu cells", N, N2);
     if (N != N2)
     {
         RCLCPP_ERROR(get_logger(), "[gmrf-validation] ERROR: GMRF map size and GT map size do not match!");
-        return;
+        return {0.0, 0.0, 0.0};
     }
 
     using visualization_msgs::msg::Marker;
     Marker metric_marker;
+    if (visualize_gmrf)
+    {
+        // Visualization Metric is a single marker of type POINTS
+        metric_marker.header.frame_id = "map";
+        metric_marker.header.stamp = rclcpp::Time(0);
+        metric_marker.ns = "gmrf_metric";
+        metric_marker.id = 0;
+        metric_marker.type = Marker::POINTS;
+        metric_marker.action = Marker::ADD;
+        // shape
+        metric_marker.scale.x = cell_size;
+        metric_marker.scale.y = cell_size;
 
-    // Visualization Metric is a single marker of type POINTS
-    metric_marker.header.frame_id = "map";
-    metric_marker.header.stamp = rclcpp::Time(0);
-    metric_marker.ns = "gmrf_metric";
-    metric_marker.id = 0;
-    metric_marker.type = Marker::POINTS;
-    metric_marker.action = Marker::ADD;
-    // shape
-    metric_marker.scale.x = cell_size;
-    metric_marker.scale.y = cell_size;
-
-    // Add one POINTS marker per cell
-    metric_marker.points.reserve(N);
-    metric_marker.colors.reserve(N);
+        // Add one POINTS marker per cell
+        metric_marker.points.reserve(N);
+        metric_marker.colors.reserve(N);
+    }
 
     // METRICS
     double sum_AE = 0.0;                // Angular Error (0-1)
     double sum_squared_error = 0.0;     // for RMSE (0-inf)
     double sum_gt_magnitudes = 0.0;     // To normalize the RMSE
-    double sum_NLPD = 0.0;              // Negative Log-Predictive Density (NLPD)
+    double sum_NLPD = 0.0;              // Negative Log-Predictive Density (NLPD) (-inf, inf)
 
     for (size_t i = 0; i < N; ++i)
     {
@@ -501,10 +475,10 @@ void Cvalgt::compute_performance_metrics()
 
             // Get GMRF estimation at cell i
             WindVector est_wind = gmrf_map->getEstimation(i);
-            double est_x = est_wind.module * cos(est_wind.direction);
-            double est_y = est_wind.module * sin(est_wind.direction);
             double est_module = est_wind.module;
             double est_direction = est_wind.direction;
+            double est_x = est_wind.module * cos(est_wind.direction);
+            double est_y = est_wind.module * sin(est_wind.direction);
             double est_std = est_wind.stdDev;
             double est_stdX = est_wind.stdDevX;
             double est_stdY = est_wind.stdDevY;
@@ -567,22 +541,25 @@ void Cvalgt::compute_performance_metrics()
             // ===============================
             // VISUALIZE METRIC
             // ===============================
-            // Cell center coordinates
-            double cx = 0.0, cy = 0.0;
-            gmrf_map->id2xy_public(i, cx, cy);
-            
-            // Add one point at the cell center
-            geometry_msgs::msg::Point p;
-            p.x = cx;
-            p.y = cy;
-            p.z = 0.0;
-            metric_marker.points.push_back(p);
-            
-            std_msgs::msg::ColorRGBA color;
-            // color -> must normalize to [0-199]
-            Utils::get_arrow_color(AE , 1, color.r, color.g, color.b);
-            color.a = 1.0;       // transparency
-            metric_marker.colors.push_back(color);
+            if (visualize_gmrf)
+            {
+                // Cell center coordinates
+                double cx = 0.0, cy = 0.0;
+                gmrf_map->id2xy_public(i, cx, cy);
+                
+                // Add one point at the cell center
+                geometry_msgs::msg::Point p;
+                p.x = cx;
+                p.y = cy;
+                p.z = 0.0;
+                metric_marker.points.push_back(p);
+                
+                std_msgs::msg::ColorRGBA color;
+                // color -> must normalize to [0-199]
+                Utils::get_arrow_color(NLPD, 1, color.r, color.g, color.b);
+                color.a = 1.0;       // transparency
+                metric_marker.colors.push_back(color);
+            }
         }
     }
     metric_pub->publish(metric_marker);
@@ -601,19 +578,57 @@ void Cvalgt::compute_performance_metrics()
     double ANLPD = sum_NLPD / N;
     RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLPD = %.2f", ANLPD);
 
-    // Save metrics to file
-    gmrf_map->read_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
-    std::ofstream metrics_file;
-    metrics_file.open(metrics_filename, std::ios_base::app); // append mode
-    metrics_file << GMRF_lambdaPrior_reg << ","
-                 << GMRF_lambdaPrior_flux_conservation << ","
-                 << GMRF_lambdaPrior_obstacles << ","
-                 << GMRF_lambdaObs << ","
-                 << RMSE << ","
-                 << AAE << ","
-                 << ANLPD << "\n";
-    metrics_file.close();
+    return {AAE, RMSE, ANLPD};
 }
+
+
+void Cvalgt::update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs)
+{
+    gmrf_map->update_lambdas(lambda_reg, lambda_flux, lambda_obstacles, lambda_obs);
+}
+
+void Cvalgt::read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles, double &lambda_obs)    
+{
+    gmrf_map->read_lambdas(lambda_reg, lambda_flux, lambda_obstacles, lambda_obs);
+}
+
+
+
+void saveMetricsToCSV(const std::string& filename, 
+               const std::vector<int>& v_n_obs, 
+               const std::vector<double>& v_AAE,
+               const std::vector<double>& v_RMSE,
+               const std::vector<double>& v_NLPD,
+               const std::vector<double>& l_reg, 
+               const std::vector<double>& l_flux, 
+               const std::vector<double>& l_obst,
+               const std::vector<double>& l_obs)
+{
+    std::ofstream file(filename);
+
+    if (file.is_open()) {
+        // 1. Escribir el encabezado (Header)
+        file << "N_Obs, AAE, RMSE, NLPD, Lambda_Reg, Lambda_Flux, Lambda_Obstacles, Lambda_Observations\n";
+
+        // 2. Escribir los datos fila por fila
+        for (size_t j = 0; j < v_n_obs.size(); ++j) {
+            file << v_n_obs[j] << "," 
+                 << v_AAE[j] << "," 
+                 << v_RMSE[j] << "," 
+                 << v_NLPD[j] << "," 
+                 << l_reg[j] << ","
+                 << l_flux[j] << "," 
+                 << l_obst[j] << ","
+                 << l_obs[j] << "\n";
+        }
+
+        file.close();
+        std::cout << "Datos guardados exitosamente en " << filename << std::endl;
+    } else {
+        std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
+    }
+}
+
 
 
 //-----------------------------------------------------------------------------
@@ -624,39 +639,80 @@ int main(int argc, char** argv)
     // Initialize ROS2
     rclcpp::init(argc, argv);
 
-    // Create the GMRF-wind node
+    // Create and Init the GMRF-wind-validation node
     auto my_gmrf_map = std::make_shared<Cvalgt>();
 
-    // Main loop
-    RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] MAIN LOOP....");
-    rclcpp::Rate loop_rate(100);
+    // Initial values for the 4 Lambda parameters (Reg, Flux, Obstacles, Observations)
+    double parameters[4] = {0.1, 0.1, 0.1, 0.1};
 
-    while (rclcpp::ok())
-    //for (size_t iter = 0; iter < 100; ++iter)
+    // CERES OPTIMIZER
+    ceres::Problem problem;
+
+    // <CostFunctor, Number of Residuals, Number of Parameters>
+    ceres::CostFunction* cost_function =
+        new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4>(
+            new CostFunctor(my_gmrf_map.get())
+        );
+
+    problem.AddResidualBlock(cost_function, nullptr, parameters);
+
+    // 3. Configure and Run the solver
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::DENSE_QR;
+    options.minimizer_progress_to_stdout = true;
+
+
+    // LOOP
+    //=========================================
+    // Vectores para almacenar los resultados
+    std::vector<int> v_n_obs;
+    std::vector<double> v_AAE;
+    std::vector<double> v_RMSE;
+    std::vector<double> v_NLPD;
+    std::vector<double> l_reg;
+    std::vector<double> l_flux;
+    std::vector<double> l_obst;
+    std::vector<double> l_obs;
+    
+    for (int i = 1; i <= 500; i += 10) 
     {
-        rclcpp::spin_some(my_gmrf_map);     // Callbacks & Services
+        // Simulate N (random) observations
+        my_gmrf_map->SimulateWindObservations(i);
 
-        if (my_gmrf_map->module_init)
-        {
-            // Update Lambda values
-            //my_gmrf_map->update_parameters();
+        // Optimize Lambdas
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
 
-            // Update Estimation + Uncertainty
-            my_gmrf_map->update();
-           
-            // Publish Map as markers (RVIZ2)
-            my_gmrf_map->publishMaps();
+        // Output results
+        std::cerr << summary.FullReport() << "\n";
+        std::cerr << "Final parameters: "
+                    << parameters[0] << ", " << parameters[1] << ", "
+                    << parameters[2] << ", " << parameters[3] << "\n";
 
-            // Compare with GT
-            my_gmrf_map->compute_performance_metrics();
-        }
-        else
-        {
-            if (my_gmrf_map->verbose)
-                RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf] Waiting for initialization (Occupancy map of the environment).");
-        }
+        // Compute performance metrics with current parameters
+        std::array<double, 3> metrics = my_gmrf_map->compute_performance_metrics();
+        double AAE_opt = metrics[0];  // AAE is the first element
+        double RMSE_opt = metrics[1]; // RMSE is the second element
+        double NLPD_opt = metrics[2]; // NLPD is the third element
 
-        // Keep the loop rate
-        loop_rate.sleep();
+        // Guardar resultados
+        v_n_obs.push_back(i);
+        v_AAE.push_back(AAE_opt);
+        v_RMSE.push_back(RMSE_opt);
+        v_NLPD.push_back(NLPD_opt);
+        l_reg.push_back(parameters[0]);
+        l_flux.push_back(parameters[1]);
+        l_obst.push_back(parameters[2]);
+        l_obs.push_back(parameters[3]);
+
+        // Update Estimation + Uncertainty
+        //my_gmrf_map->update();
+        
+        // Publish Map as markers (RVIZ2)
+        //my_gmrf_map->publishMaps();
     }
+
+    std::string nombreArchivo = "gmrf_nlpd_optimization_n_obs3.csv";
+    saveMetricsToCSV(nombreArchivo, v_n_obs, v_AAE, v_RMSE, v_NLPD, l_reg, l_flux, l_obst, l_obs);
+    return 0;
 }
