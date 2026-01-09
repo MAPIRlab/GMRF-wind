@@ -22,6 +22,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(gmrf_msgs REQUIRED) 
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(Ceres REQUIRED)
 
 
 FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
@@ -31,6 +32,7 @@ include_directories(
   include
   ${EIGEN3_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
 )
 
 # Install launch files and related config files.
@@ -46,8 +48,8 @@ target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS} yaml-cpp)
 
 # GMRF-VALIDATION
 add_executable(gmrf_validation src/gmrf_validation.cpp src/gmrf_map.cpp)
-target_include_directories(gmrf_validation PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(gmrf_validation ${OpenCV_LIBS} yaml-cpp)
+target_include_directories(gmrf_validation PUBLIC ${OpenCV_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS})
+target_link_libraries(gmrf_validation ${OpenCV_LIBS} ${CERES_LIBRARIES} yaml-cpp)
 
 # DEPENDENCIES
 ament_target_dependencies(gmrf_wind_mapping_node
