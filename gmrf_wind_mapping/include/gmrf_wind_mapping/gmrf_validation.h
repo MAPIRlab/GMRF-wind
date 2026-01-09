@@ -47,6 +47,7 @@ public:
     void SimulateWindObservations(size_t N_obs);
     void update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs);
     void read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles, double &lambda_obs);
+    void saveGMRFEstimationToCSV(const std::string& file_name);
     bool module_init;
     bool verbose;
     bool visualize_gmrf;

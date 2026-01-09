@@ -582,6 +582,66 @@ std::array<double,3> Cvalgt::compute_performance_metrics() const
 }
 
 
+void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
+{
+    // Header
+    Eigen::Vector2i dimensions = gmrf_map->map_size();
+    size_t N = dimensions.x()*dimensions.y();
+
+    std::ofstream csv_file;
+    csv_file.open(file_name);
+
+    // Save header
+    csv_file << "Dimensions_x," << dimensions.x() << "\n";
+    csv_file << "Dimensions_y," << dimensions.y() << "\n";
+    csv_file << "Cell_size," << cell_size << "\n";
+    csv_file << "cell_index,"
+             << "gmrf_wind_x,"
+             << "gmrf_wind_y,"
+             << "gmrf_std_x,"
+             << "gmrf_std_y,"
+             << "gt_wind_x,"
+             << "gt_wind_y\n";
+
+    for (size_t i = 0; i < N; ++i)
+    {
+        // Skip occupied cells
+        if (gmrf_map->is_cell_free(i))
+        {
+            // Get GMRF estimation at cell i
+            WindVector est_wind = gmrf_map->getEstimation(i);
+            double est_x = est_wind.module * cos(est_wind.direction);
+            double est_y = est_wind.module * sin(est_wind.direction);
+            double est_stdX = est_wind.stdDevX;
+            double est_stdY = est_wind.stdDevY;
+
+            // Get GT wind at cell i
+            WindVectorXY gt_wind = gt_map[i];
+            double gt_x = gt_wind.x;
+            double gt_y = gt_wind.y;
+
+            // Save to CSV
+            csv_file << i << ","
+                     << est_x << ","
+                     << est_y << ","
+                     << est_stdX << ","
+                     << est_stdY << ","
+                     << gt_x << ","
+                     << gt_y << "\n";
+        }
+        else
+        {
+            // For occupied cells, save NaN
+            csv_file << i << ","
+                     << "NaN,NaN,NaN,NaN,NaN,NaN\n";
+        }
+    }
+
+    csv_file.close();
+    RCLCPP_INFO(get_logger(), "[gmrf-validation] GMRF estimation saved to CSV file: %s", file_name.c_str());
+}
+
+
 void Cvalgt::update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs)
 {
     gmrf_map->update_lambdas(lambda_reg, lambda_flux, lambda_obstacles, lambda_obs);
@@ -710,6 +770,10 @@ int main(int argc, char** argv)
         
         // Publish Map as markers (RVIZ2)
         //my_gmrf_map->publishMaps();
+
+        // Save estimation to file (for visualization later)
+        std::string file_name = "gmrf_opt_estimation_obs_" + std::to_string(i) + ".csv";
+        my_gmrf_map->saveGMRFEstimationToCSV(file_name);
     }
 
     std::string nombreArchivo = "gmrf_nlpd_optimization_n_obs3.csv";
