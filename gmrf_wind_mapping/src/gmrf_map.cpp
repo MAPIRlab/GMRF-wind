@@ -893,6 +893,9 @@ void CGMRF_map::computeUncertainty_GMRF()
         {
             // Failed to factorize the matrix. The system might be ill-conditioned or singular.
             std::cerr << "[GMRF-computeUncertainty_GMRF] Error: Failed to compute Cholesky factorization of Hsparse. Cannot compute uncertainty." << std::endl;
+
+            if (estimateTiming)
+                stdTimer.stop(); // Stop Timer for Uncertainty computation
             return;
         }
 
