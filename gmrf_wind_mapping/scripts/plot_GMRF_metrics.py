@@ -1,18 +1,20 @@
 #!/usr/bin/env python
-"""
-    Plots the GMRF factor-graph with the relations between the nodes
-"""
-
 import os
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib
+# Switch to the 'Agg' backend. This is CRITICAL for remote servers without X11.
+# It allows Matplotlib to render to files (PNG, PDF, etc.) without needing a display.
+# This call must be made BEFORE importing matplotlib.pyplot.
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
-lambda_suf = "flux"
-metrics_file = "gmrf_validation_metrics_lambda_" + lambda_suf + ".csv"
-# output filename: 'data' + '.png'
+
+# Configuration
+metrics_file = "NLPD_optimization_results_central_obstacle_1ms_negative/gmrf_opt_metrics_lambda_Nobs.csv"
 base_name = os.path.splitext(metrics_file)[0]
 out_file = base_name + '.png'
+output_dir = "metrics_plots"
 
 def main():
     if not os.path.isfile(metrics_file):
@@ -28,57 +30,49 @@ def main():
     if df.empty:
         raise RuntimeError("CSV is empty")
 
-    # Define columns to plot
-    x_col = 'GMRF_lambdaPrior_' + lambda_suf
-    y_cols = ['NRMSE', 'NCosSim', 'NLL']
+    # Output
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # Ensure required columns exist
-    missing_cols = [c for c in ([x_col] + y_cols) if c not in df.columns]
-    if missing_cols:
-        raise KeyError(f"Missing required columns: {missing_cols}")
+   
+    # Sort by N_Obs to ensure lines are drawn correctly
+    df = df.sort_values('N_Obs')
 
-    # Convert x and y columns to numeric (fails early if non-numeric)
-    df[x_col] = pd.to_numeric(df[x_col], errors='raise')
-    for yc in y_cols:
-        df[yc] = pd.to_numeric(df[yc], errors='coerce')
+    # Create a figure with two subplots (side by side)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
-    # Drop rows with NaN in y columns, but keep track
-    before = len(df)
-    df = df.dropna(subset=y_cols)
-    after = len(df)
-    if after < before:
-        print(f"Dropped {before - after} rows with NaN in y-columns")
+    # --- Plot 1: Metrics (AAE, RMSE, NLPD) ---
+    ax1.plot(df['N_Obs'], df['AAE'], marker='o', label='AAE', linewidth=2)
+    ax1.plot(df['N_Obs'], df['RMSE'], marker='s', label='RMSE', linewidth=2)
+    ax1.plot(df['N_Obs'], df['NLPD'], marker='^', label='NLPD', linewidth=2)
+    
+    ax1.set_title('Evolution of Error Metrics', fontsize=14)
+    ax1.set_xlabel('Number of Observations (N_Obs)', fontsize=12)
+    ax1.set_ylabel('Metric Value', fontsize=12)
+    ax1.grid(True, linestyle='--', alpha=0.7)
+    ax1.legend()
 
-    # Sort by x for sensible line plots
-    df = df.sort_values(by=x_col)
+    # --- Plot 2: Lambda Parameters ---
+    lambdas = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles', 'Lambda_Observations']
+    markers = ['o', 's', '^', 'd']
+    
+    for lambda_col, m in zip(lambdas, markers):
+        ax2.plot(df['N_Obs'], df[lambda_col], marker=m, label=lambda_col, linewidth=2)
 
-    # Create a figure with subplots (robust for single or many y_cols)
-    n = len(y_cols)
-    fig, axes = plt.subplots(n, 1, figsize=(8, 3*n), sharex=True)
-    if n == 1:
-        axes = [axes]
+    ax2.set_title('Evolution of Lambda Parameters', fontsize=14)
+    ax2.set_xlabel('Number of Observations (N_Obs)', fontsize=12)
+    ax2.set_ylabel('Lambda Value', fontsize=12)
+    
+    # If your Lambdas vary by orders of magnitude, uncomment the line below:
+    # ax2.set_yscale('log') 
+    
+    ax2.grid(True, linestyle='--', alpha=0.7)
+    ax2.legend()
 
-    for i, y_col in enumerate(y_cols):
-        ax = axes[i]
-        ax.plot(df[x_col].values, df[y_col].values, marker='o', linestyle='-', color='b')
-        ax.set_title(f'Plot of {y_col} vs {x_col}', fontsize=12)
-        ax.set_ylabel(y_col, fontsize=10)
-        ax.grid(True, linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig('optimization_metrics_Nobs.png', dpi=300)
+    plt.show()
 
-    # Limit xticks to avoid overcrowding
-    x_unique = np.unique(df[x_col].values)
-    if x_unique.size <= 10:
-        xticks = x_unique
-    else:
-        xticks = np.linspace(x_unique.min(), x_unique.max(), 10)
-    axes[-1].set_xticks(xticks)
-    axes[-1].set_xlabel(x_col, fontsize=12)
-
-    # Auto layout and save
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    fig.suptitle('Metrics as a function of GMRF_lambdaPrior', fontsize=14, y=0.99)
-    fig.savefig(out_file, dpi=150)
-    print("Plot saved to", out_file)
 
 if __name__ == "__main__":
     main()
