@@ -71,11 +71,13 @@ public:
         double ANLPD = metrics[2]; // NLPD is the third element
 
         // 4. Return Average NLPD as residual (we optimize for NLPD minimization)
-        residual[0] = static_cast<T>(ANLPD);
+        // Since Ceres minimizes the squared residuals, we can just return the NLPD value directly
+        // Adding a constant offset to allow the NLPD can reach negative values
+        residual[0] = static_cast<T>(ANLPD+20);
         return true;
     }
 
-protected:
+
     inline void ReadMap();
     inline void ReadGroundTruthWindMap(const std::string& filename);
     void initialize();
