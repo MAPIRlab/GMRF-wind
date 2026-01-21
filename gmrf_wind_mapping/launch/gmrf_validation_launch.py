@@ -22,11 +22,11 @@ def launch_setup(context, *args, **kwargs):
         executable="gmrf_validation",
         name="gmrf",
         parameters=[
-            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_empty_room", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
-            {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_empty_room", "wind_simulations", "dynamic", "wind_at_cell_centers_1.csv")},                                 # Path to a CSV file containing the CFD ground-truth wind data
+            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_central_obstacle", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_central_obstacle", "wind_simulations", "1ms", "wind_at_cell_centers_0.csv")},                                 # Path to a CSV file containing the CFD ground-truth wind data
             {"cell_size": 0.3},                               # Size of each cell in the GMRF grid (meters)
             {"verbose": False},                               # Verbose mode for debugging
-            {"visualize_gmrf": True},                        # Visualize the GMRF wind field in RViz
+            {"visualize_gmrf": False},                        # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
             {"GMRF_lambdaObs": 0.01},                         # The initial weight (Lambda) of each observation            
             {"GMRF_lambdaPrior_flux_conservation": 0.01},     # Flux conservation law -> divergence of the wind field is zero
