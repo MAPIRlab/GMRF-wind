@@ -1133,13 +1133,38 @@ std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
 
 WindVector CGMRF_map::getEstimation(int index)
 {
-    double module = sqrt(pow(m_map[index].mean, 2) + pow(m_map[index + N].mean, 2));
-    double direction = atan2(m_map[index + N].mean, m_map[index].mean);
-    double stdev = std::max(0.01, sqrt(pow(m_map[index].std, 2) + pow(m_map[index + N].std, 2)));
-    double stdevX = std::max(0.01, m_map[index].std);
-    double stdevY = std::max(0.01, m_map[index + N].std);
+    // GMRF stores the wind field as two separate variables per cell: Wx and Wy
+    // index: cell index for Wx, index + N: cell index for Wy    
+    double x = m_map[index].mean;
+    double y = m_map[index + N].mean;
+    double stdevX = std::max(0.001, m_map[index].std);
+    double vx = stdevX * stdevX;
+    double stdevY = std::max(0.001, m_map[index + N].std);
+    double vy = stdevY * stdevY;
 
-    return {module, direction, stdev, stdevX, stdevY};
+    // We convert to polar coordinates (module, direction) and propagate uncertainties
+    double r = sqrt(pow(x, 2) + pow(y, 2));
+    double theta = atan2(y, x);
+
+    // Jacobian elements
+    double dr_dx = x / r;
+    double dr_dy = y / r;
+    double dth_dx = -y / (r*r);
+    double dth_dy = x / (r*r);
+
+    // Uncertainty propagation: Sigma_polar = J * Sigma_cartesian * J^T
+    // Assuming independence between x and y (no covariance) --> Sigma_cartesian = [vx 0; 0 vy]
+    // Resulting Sigma_r^2 = (dr/dx)^2 * vx + (dr/dy)^2 * vy
+    double var_r = (dr_dx * dr_dx * vx) + (dr_dy * dr_dy * vy);    
+    // Resulting Sigma_theta^2 = (dth/dx)^2 * vx + (dth/dy)^2 * vy
+    double var_theta = (dth_dx * dth_dx * vx) + (dth_dy * dth_dy * vy);
+
+    return {
+        r,                          // Module
+        theta,                      // Direction
+        sqrt(var_r),                // Sigma_mod
+        sqrt(var_theta),            // Sigma_angle (radians)
+    };
 }
 
 WindVector CGMRF_map::getEstimation(double x, double y)

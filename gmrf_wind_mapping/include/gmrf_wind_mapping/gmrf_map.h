@@ -38,9 +38,8 @@ struct WindVector
 {
     double module;
     double direction;
-    double stdDev;
-    double stdDevX;
-    double stdDevY;
+    double stdMod;
+    double stdAngle;
 
     Eigen::Vector2d asEigen()
     {
@@ -49,6 +48,7 @@ struct WindVector
         return Eigen::Vector2d(x, y);
     }
 };
+
 
 // Struct to hold timing data
 struct TimeStats {
