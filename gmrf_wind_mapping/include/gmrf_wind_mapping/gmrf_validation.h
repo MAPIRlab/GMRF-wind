@@ -45,8 +45,8 @@ public:
     void publishMaps();
     std::array<double, 4> compute_performance_metrics() const;
     void SimulateWindObservations(size_t N_obs);
-    void update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs);
-    void read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles, double &lambda_obs);
+    void update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles);
+    void read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles);
     void saveGMRFEstimationToCSV(const std::string& file_name);
     bool module_init;
     bool verbose;
@@ -56,11 +56,11 @@ public:
     template <typename T>
     bool evaluate_cost(const T* const params, T* residual) const
     {
-        // 1. Update GMRF lambdas (Reg, Flux, Obstacles, Observations)
+        // 1. Update GMRF lambdas (Reg, Flux, Obstacles)
         gmrf_map->update_lambdas( static_cast<double>(params[0]),
                                   static_cast<double>(params[1]),
-                                  static_cast<double>(params[2]),
-                                  static_cast<double>(params[3]) );
+                                  static_cast<double>(params[2]) 
+                                );
         
         // 2. Run MAP estimation and uncertainty computation
         gmrf_map->MAP_estimation_GMRF();
@@ -103,7 +103,8 @@ public:
     double GMRF_lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
     double GMRF_lambdaPrior_flux_conservation; // Weight for flux conservation law prior
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
-    double GMRF_lambdaObs;     // [GMRF model] The initial information (Lambda) of each observation (this information will decrease with time)
+    double observation_var_wind_speed;          // Variance of the wind speed measurement (m/s)^2
+    double observation_var_wind_direction;      // Variance of the wind direction measurement (rad)^2
     
     // Variables
     boost::mutex mutex_anemometer;

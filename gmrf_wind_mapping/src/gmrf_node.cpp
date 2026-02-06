@@ -43,12 +43,15 @@ Cgmrf::Cgmrf()
     verbose = declare_parameter<bool>("verbose", false);
     visualize_gmrf = declare_parameter<bool>("visualize_gmrf", true);
 
-    // Lambda/weights for the different priors and observation factors
+    // Lambda/weights for the different priors
     GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
     GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
-    GMRF_lambdaObs = declare_parameter<double>("GMRF_lambdaObs", 1.0);
-    GMRF_lambdaObsLoss = declare_parameter<double>("GMRF_lambdaObsLoss", 0.0);
+
+    // Observation variances (Gaussian likelihood)
+    observation_var_wind_speed = declare_parameter<double>("observation_var_wind_speed", 0.0001);           // Variance of the wind speed measurement (m/s)^2
+    observation_var_wind_direction = declare_parameter<double>("observation_var_wind_direction", 0.0001);       // Variance of the wind direction measurement (rad)^2
+
     
     // Subscriptions
     //----------------------------------
@@ -180,7 +183,6 @@ void Cgmrf::initialize()
                                         GMRF_lambdaPrior_reg, 
                                         GMRF_lambdaPrior_flux_conservation,
                                         GMRF_lambdaPrior_obstacles,
-                                        GMRF_lambdaObs,
                                         verbose,
                                         true // estimateTiming
                                         );
@@ -268,8 +270,10 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
         float y_pos = transform.transform.translation.y;
 
         mutex_anemometer.lock();
-        // RCLCPP_INFO(get_logger(), "[GMRF] New obs: %.2f m/s, %.2f rad at (%.2f,%.2f)", reading_speed,reading_direction,x_pos,y_pos);
-        my_map->insertObservation_GMRF(reading_speed, downwind_direction_map, x_pos, y_pos, GMRF_lambdaObs);
+        // TODO: Read from parameter or add to the message the variance of the measurement
+        double var_wind_speed = 0.001; // (m/s)^2
+        double var_wind_direction = 0.0001; // (rad)^2
+        my_map->insertObservation_GMRF(reading_speed, downwind_direction_map, var_wind_speed, var_wind_direction, x_pos, y_pos);
         mutex_anemometer.unlock();
     }
 }
@@ -290,13 +294,11 @@ void Cgmrf::publishMaps()
 
 void Cgmrf::update()
 {
-    // Update Lambda parameters (read parameter server)
+    // Update Lambda parameters (from parameter server)
     GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
     GMRF_lambdaPrior_flux_conservation = get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
-    GMRF_lambdaObs = get_parameter("GMRF_lambdaObs").as_double();
-    GMRF_lambdaObsLoss = get_parameter("GMRF_lambdaObsLoss").as_double();
-    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles, GMRF_lambdaObs);
+    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles);
 
     // Update GMRF estimation
      my_map->MAP_estimation_GMRF();
@@ -358,7 +360,10 @@ bool Cgmrf::add_wind_observation_srv(AddWindObservation::Request::SharedPtr req,
 
     for (int i = 0; i < req->wind_speed.size(); i++)
     {
-        my_map->insertObservation_GMRF(req->wind_speed[i], req->wind_direction[i], req->x_pos[i], req->y_pos[i], GMRF_lambdaObs);
+        // TODO: Read from parameter or add to the message the variance of the measurement
+        double var_wind_speed = 0.001; // (m/s)^2
+        double var_wind_direction = 0.0001; // (rad)^2
+        my_map->insertObservation_GMRF(req->wind_speed[i], req->wind_direction[i], var_wind_speed, var_wind_direction, req->x_pos[i], req->y_pos[i]);
         if (verbose)
             RCLCPP_INFO(get_logger(), "[GMRF-node] New wind observation added via service at (%.2f, %.2f): %.2f m/s, %.2f rad", req->x_pos[i], req->y_pos[i], req->wind_speed[i], req->wind_direction[i]);
     }

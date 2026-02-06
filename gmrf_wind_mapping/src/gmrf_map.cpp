@@ -12,7 +12,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                      double m_lambdaPrior_reg,
                      double m_lambdaPrior_flux_conservation, 
                      double m_lambdaPrior_obstacles,
-                     double m_lambdaObservations,
                      bool verbose,
                      bool estimateTiming=false)
 {
@@ -28,12 +27,8 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         lambdaPrior_reg = m_lambdaPrior_reg;
         lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
         lambdaPrior_obstacles = m_lambdaPrior_obstacles;
-        lambdaObservations = m_lambdaObservations;
         // Compute SQRT values
-        //lambdaPrior_reg_sqrt = std::sqrt(lambdaPrior_reg);
-        //lambdaPrior_flux_conservation_sqrt = std::sqrt(lambdaPrior_flux_conservation);
-        //lambdaPrior_obstacles_sqrt = std::sqrt(lambdaPrior_obstacles);
-
+        
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
         double x_min = oc_map.origin_x;
         double x_max = oc_map.origin_x + oc_map.width * oc_map.resolution;
@@ -400,22 +395,20 @@ CGMRF_map::~CGMRF_map()
 
 void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
                         double m_lambdaPrior_flux_conservation, 
-                        double m_lambdaPrior_obstacles,
-                        double m_lambdaObservations)
+                        double m_lambdaPrior_obstacles
+                        )
 {
     // Update internal variables
     lambdaPrior_reg = m_lambdaPrior_reg;
     lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
-    lambdaObservations = m_lambdaObservations;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles, double &m_lambdaObservations)
+void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles)
 {
     m_lambdaPrior_reg = lambdaPrior_reg;
     m_lambdaPrior_flux_conservation = lambdaPrior_flux_conservation;
     m_lambdaPrior_obstacles = lambdaPrior_obstacles;
-    m_lambdaObservations = lambdaObservations;
 }
 
 /*---------------------------------------------------------------
@@ -551,7 +544,7 @@ bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2
 /*---------------------------------------------------------------
              Insert New Wind Observation
 ---------------------------------------------------------------*/
-void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs)
+void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos)
 {
     try
     {
@@ -575,38 +568,30 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
 
         TobservationGMRF new_obs;
         new_obs.cell_idx = cellIdx;
-        new_obs.windX = wind_speed * cos(wind_direction);
-        new_obs.windY = wind_speed * sin(wind_direction);
-        new_obs.lambda = lambdaObs;
+        new_obs.wind_module = wind_speed;
+        new_obs.wind_direction = wind_direction;
+        new_obs.var_module = var_wind_speed;
+        new_obs.var_direction = var_wind_direction;
+        // Convert wind speed and direction to Wx and Wy components in the map reference system
+        new_obs.wind_x = wind_speed * cos(wind_direction);
+        new_obs.wind_y = wind_speed * sin(wind_direction);
+        // Compute Full Covariance Sigma_xy (non-diagonal) from var_module and var_direction using error propagation
+        double r = wind_speed;
+        double theta = wind_direction;
+        double var_r = var_wind_speed;
+        double var_theta = var_wind_direction;
+        new_obs.var_xx = var_r * cos(theta)*cos(theta) + r*r * var_theta * sin(theta)*sin(theta);
+        new_obs.var_yy = var_r * sin(theta)*sin(theta) + r*r * var_theta * cos(theta)*cos(theta);
+        new_obs.cov_xy = (var_r - r*r * var_theta) * sin(theta) * cos(theta);
+        // Time variant or invariant observation
         new_obs.time_invariant = true; // Default behaviour, the obs will not lose weight with time.
+
         if (verbose)
-            std::cerr << "[GMRF-MAP] New obs: Wx = " << new_obs.windX << " m/s Wy = " << new_obs.windY << " m/s" << std::endl;
+            std::cerr << "[GMRF-MAP] New obs: Wx = " << new_obs.wind_x << " m/s Wy = " << new_obs.wind_y << " m/s" << std::endl;
 
         // Add Observation to GMRF
         add_obs(new_obs);
         nObsFactors += 2; // we add 2 factors foe each observation to account for Wx and Wy components
-        
-        /*
-            // NOTE --> Create 4 observations to expand a bit the measurement impact, replicating the content to neighbour cells
-            if (is_cell_free(cellIdx - 1))
-            {
-                new_obs.cell_idx = cellIdx - 1;
-                add_obs(new_obs);
-                nObsFactors += 2;
-            }
-            if (is_cell_free(cellIdx - m_size_x))
-            {
-                new_obs.cell_idx = cellIdx - m_size_x;
-                add_obs(new_obs);
-                nObsFactors += 2;
-            }
-            if (is_cell_free(cellIdx - m_size_x - 1))
-            {
-                new_obs.cell_idx = cellIdx - m_size_x - 1;
-                add_obs(new_obs);
-                nObsFactors += 2;
-            }
-        */
     }
     catch (std::exception e)
     {
@@ -615,6 +600,9 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         std::cerr << "=============================================================" << std::endl;
     }
 }
+
+
+
 
 
 void CGMRF_map::clearObservations_GMRF()
@@ -633,100 +621,12 @@ void CGMRF_map::clearObservations_GMRF()
 }
 
 
-// ----------------------------------------------------------------------
-// ------------ LOG MARGINAL LIKELIHOOD OPTIMIZATION LOOP ---------------
-// ----------------------------------------------------------------------
-void CGMRF_map::optimize_LML(bool performLMLOptimization, int maxIterations, double learningRate, double LML_threshold)
-{
-    if (verbose) std::cerr << "[GMRF] Starting GMRF Estimation..." << (performLMLOptimization ? " (LML Optimization Active)" : " (Fixed Hyperparameters)") << std::endl;
-    
-    // Always run at least one MAP estimation, even if not optimizing
-    if (!performLMLOptimization) {
-        MAP_estimation_GMRF();
-        return; // MAP done, exit
-    }
-
-    // LML Optimization Loop -> We optimize the hyperparameters (lambdas) by maximizing the Log Marginal Likelihood
-    //-----------------------------------------------------------
-    double currentLML = -std::numeric_limits<double>::infinity();
-    double prevLML = -std::numeric_limits<double>::infinity();
-    
-    // Define the lambda vector for easy update and gradient calculation
-    // Order: [0]Observations, [1]Regularization, [2]Flux, [3]Obstacle
-    Eigen::Vector4d lambdaVec;
-    lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
-    
-    // Momentum and Velocity state (for optimization)
-    Eigen::Vector4d velocity = Eigen::Vector4d::Zero();
-    double momentum = 0.9;
-    Eigen::Vector4d gradientVec;
-    
-    for (int iter = 0; iter < maxIterations; ++iter)
-    {
-        if (verbose) std::cerr << "\n[LML Iteration " << iter + 1 << "]" << std::endl;
-        
-        // 1. State Estimation (MAP)
-        // Compute MAP estimate using the current lambdas
-        MAP_estimation_GMRF();
-                
-        // 2. Hyperparameter Maximization (LML & Gradient)
-        prevLML = currentLML;
-        
-        std::pair<double, Eigen::Vector4d> result = calculate_LML_gradient();
-        currentLML = result.first;
-        gradientVec = result.second;
-        
-        // Control gradient explosion
-        for (int i = 0; i < 4; ++i) {
-            if (std::abs(gradientVec(i)) > 1e2) {
-                gradientVec(i) = (gradientVec(i) > 0 ? 1e2 : -1e2);
-            }
-        }
-
-        if (verbose) {
-            std::cerr << "  -> LML: " << currentLML << std::endl;
-            std::cerr << "  -> Lambdas: " << lambdaVec.transpose() << std::endl;
-            std::cerr << "  -> Gradient: " << gradientVec.transpose() << std::endl;
-        }
-
-        // 3. Check Convergence
-        if (iter > 0 && std::abs(currentLML - prevLML) < LML_threshold) {
-            if (verbose) std::cerr << "[LML] Optimization converged. Delta LML: " << (currentLML - prevLML) << std::endl;
-            break;
-        }
-        
-        // 4. Gradient Ascent Update (Simplified Optimizer - but slow convergence)
-        //lambdaVec += learningRate * gradientVec;
-
-        // 4b. Update with Momentum & Adaptive Learning Rate (Step-Halving)
-        if (iter > 0 && currentLML < prevLML) {
-            // If LML decreased (it shouldn't in ascent), we reduce learning rate and velocity
-            learningRate *= 0.5;
-            velocity *= 0.5;
-            if (verbose) std::cerr << "  (Step-back: Reducing learning rate to " << learningRate << ")" << std::endl;
-        }
-
-        velocity = momentum * velocity + learningRate * gradientVec;
-        lambdaVec += velocity;
-
-        // Apply boundary constraints (lambdas must be positive)
-        for (int i = 0; i < 4; ++i) lambdaVec(i) = std::max(1e-6, lambdaVec(i));
-
-        // Update class members for next MAP step
-        lambdaObservations = lambdaVec(0);
-        lambdaPrior_reg = lambdaVec(1);
-        lambdaPrior_flux_conservation = lambdaVec(2);
-        lambdaPrior_obstacles = lambdaVec(3);
-    }
-}
-
 
 double CGMRF_map::getLambdaValue(FactorType type) const {
     switch (type) {
         case FactorType::Regularization: return lambdaPrior_reg;
         case FactorType::FluxConservation: return lambdaPrior_flux_conservation;
         case FactorType::Obstacle: return lambdaPrior_obstacles;
-        case FactorType::Observation: return lambdaObservations;
         default: return 0.0;
     }
 }
@@ -788,24 +688,65 @@ void CGMRF_map::MAP_estimation_GMRF()
         size_t count = nPriorFactors;       // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
-            // Each observation translates to 2 factors (Wx,Wy)
-            // Wx range [1,N]
-            Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
-            J_temp.push_back(J_entry);
-            y_temp[count] = ito->windX;
-            //Eigen::Triplet<double> lambda_entry(count, count, ito->lambda);
-            Eigen::Triplet<double> lambda_entry(count, count, lambdaObservations); // Use fixed lambda for observations (param)
-            Lambda_temp.push_back(lambda_entry);
-            count++;
+            bool x_y_independent = true;
 
-            // Wy range [N+1,2N]            
-            Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
-            J_temp.push_back(J_entry2);
-            y_temp[count] = ito->windY;
-            //Eigen::Triplet<double> lambda_entry2(count, count, ito->lambda);
-            Eigen::Triplet<double> lambda_entry2(count, count, lambdaObservations); // Use fixed lambda for observations (param)
-            Lambda_temp.push_back(lambda_entry2);
-            count++;
+            if (x_y_independent)
+            {
+                // Each observation translates to 2 factors (Wx,Wy)
+                // Wx range [1,N]
+                Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
+                J_temp.push_back(J_entry);
+                y_temp[count] = ito->wind_x;
+                Eigen::Triplet<double> lambda_entry(count, count, 1.0/ito->var_xx);
+                Lambda_temp.push_back(lambda_entry);
+                count++;
+
+                // Wy range [N+1,2N]            
+                Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
+                J_temp.push_back(J_entry2);
+                y_temp[count] = ito->wind_y;
+                Eigen::Triplet<double> lambda_entry2(count, count, 1.0/ito->var_yy);
+                Lambda_temp.push_back(lambda_entry2);
+                count++;
+            }
+            else
+            {
+                // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
+                // we would need to introduce off-diagonal terms in Lambda.
+
+                    
+
+                double var_xx = ito->var_xx;
+                double var_yy = ito->var_yy;
+                double cov_xy = ito->cov_xy;
+                // 2. Invert 2x2 matrix to get Precision (Lambda)                
+                double det = var_xx * var_yy - cov_xy * cov_xy;
+                if (det < 1e-9) det = 1e-9; // Add small epsilon for numerical stability if r approx 0
+
+                // Lambda_uv = inv(Sigma_xy) = (1/det) * [var_yy, -cov_xy; -cov_xy, var_xx]
+                double L_xx = var_yy / det;
+                double L_yy = var_xx / det;
+                double L_xy = -cov_xy / det;
+
+                // --- Update Triplets ---
+
+                // Row for w_x=Obs_x component
+                J_temp.push_back(Eigen::Triplet<double>(count, ito->cell_idx, 1));
+                y_temp[count] = ito->wind_x;
+
+                // Row for w_y=Obs_y component
+                J_temp.push_back(Eigen::Triplet<double>(count + 1, ito->cell_idx + N, 1));
+                y_temp[count + 1] = ito->wind_y;
+
+                // Fill the 2x2 Precision Block in Lambda
+                // This links row 'count' and 'count+1'
+                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count,     L_xx)); // diagonal x
+                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count + 1, L_yy)); // diagonal y
+                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count + 1, L_xy)); // cross-term
+                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count,     L_xy)); // cross-term (symmetric)
+
+                count += 2;
+            }
         }
 
         
@@ -943,192 +884,7 @@ void CGMRF_map::computeUncertainty_GMRF()
 }
 
 
-// ----------------------------------------------------------------------
-// -------------------- LML & GRADIENT CALCULATION ----------------------
-// ----------------------------------------------------------------------
-std::pair<double, Eigen::Vector4d> CGMRF_map::calculate_LML_gradient()
-{
-    // LML = Term1 (Fit) + Term2 (Complexity) + Term3 (Prior Certainty)
-    // ---------------------------------------------------------------
-    double T1, T2, T3;
-    Eigen::Vector4d gradientVec = Eigen::Vector4d::Zero();
-    Eigen::Vector4d lambdaVec;
-    lambdaVec << lambdaObservations, lambdaPrior_reg, lambdaPrior_flux_conservation, lambdaPrior_obstacles;
 
-    // Compute T1 (Minimum Weighted Energy) and its gradient T1_grad
-    // ---------------------------------------------------------------
-    // T1 = -0.5 * residual' * Lambda * residual
-    // T1_grad_i = -0.5 * sum_k (residual_k^2 * E_i(k,k))
-    
-    // We need the squared residual for each constraint, grouped by lambda type
-    double r_sq_obs = 0.0;
-    double r_sq_reg = 0.0;
-    double r_sq_flux = 0.0;
-    double r_sq_obst = 0.0;
-    
-    size_t count = 0;
-    // Prior factors (first nPriorFactors rows)
-    for (const auto& entry : factor_types) 
-    {
-        double r_sq = residual(entry.first) * residual(entry.first);
-        switch (entry.second) {
-            case FactorType::Regularization: r_sq_reg += r_sq; break;
-            case FactorType::FluxConservation: r_sq_flux += r_sq; break;
-            case FactorType::Obstacle: r_sq_obst += r_sq; break;
-            default: break; // Should not happen
-        }
-        count = entry.first;
-    }
-    // Observation factors (rows nPriorFactors to nFactors-1)
-    for (size_t i = nPriorFactors; i < nFactors; ++i) {
-        r_sq_obs += residual(i) * residual(i);
-    }
-    
-    // Calculate T1 value (Note: The Lambda multiplication is handled by the group sums)
-    T1 = -0.5 * (lambdaObservations * r_sq_obs + lambdaPrior_reg * r_sq_reg + 
-                 lambdaPrior_flux_conservation * r_sq_flux + lambdaPrior_obstacles * r_sq_obst);
-                 
-    // Calculate T1 gradient components (order: [0]Obs, [1]Reg, [2]Flux, [3]Obstacle)
-    gradientVec(0) += -0.5 * r_sq_obs;
-    gradientVec(1) += -0.5 * r_sq_reg;
-    gradientVec(2) += -0.5 * r_sq_flux;
-    gradientVec(3) += -0.5 * r_sq_obst;
-
-
-    // Compute T2 (Complexity Penalty) and its gradient T2_grad
-    // ---------------------------------------------------------------
-    // T2 = -0.5 * log(|H|)
-    // T2_grad_i = -0.5 * Tr(H^-1 * J' * E_i * J)
-
-    // T2 Value: Use the Cholesky factorization (H = L L^T). |H| = prod(L_ii^2). log(|H|) = 2 * sum(log(L_ii)).
-    double log_det_H_sum = 0.0;
-    
-    // Get the actual sparse matrix from the TriangularView (L factor)
-    const auto& L_factor = solver.matrixL().nestedExpression();
-    
-    // Loop over the columns (or rows, since it's a view of a sparse matrix)
-    for (int j = 0; j < L_factor.outerSize(); ++j) {
-        // Iterate over the non-zero elements in the current column (j)
-        for (Eigen::SparseMatrix<double>::InnerIterator it(L_factor, j); it; ++it) {
-            if (it.row() == j) {
-                // Found the diagonal element L_j,j. Log(|H|) = 2 * sum(log(L_j,j))
-                log_det_H_sum += std::log(it.value());
-                break; 
-            }
-        }
-    }
-    
-    T2 = -1.0 * log_det_H_sum;  // Since log|H| = 2 * sum(log|Lii|)
-
-    // T2 Gradient (Complexity Term) - Using Diagonal Approximation for Trace
-    // Tr(H^-1 * J' * E_i * J) ~ sum_k ( (J' * E_i * J)_k,k * (H^-1)_k,k )
-    // Since (H^-1)_k,k is H_diag_inv(k), we use that.
-    
-    // We need the diagonal of J' * E_i * J.
-    // J' * E_i * J is a sparse matrix, so we compute the diagonal directly.
-    
-    Eigen::VectorXd J_E_J_diag = Eigen::VectorXd::Zero(Hsparse.rows());
-    
-    // The matrix J'*E_i*J is proportional to the Hessian H, but only using the factors weighted by lambda_i
-    // J' * E_i * J = J' * (Lambda_i / lambda_i) * J = H_i / lambda_i
-    
-    // To implement J'*E_i*J for each i, we need to efficiently extract the Hessian contribution from J'*Lambda*J
-    // The easiest way is to compute the diagonal of J'*E_i*J:
-    // (J' * E_i * J)_k,k = sum_l (J_l,k^2 * E_i(l,l)) = sum_{l in constraints_i} J_l,k^2
-    
-    // Create a boolean mask for each factor type (e.g., E_obs, E_reg, etc.)
-    std::vector<bool> is_obs_factor(nFactors, false);
-    std::vector<bool> is_reg_factor(nFactors, false);
-    std::vector<bool> is_flux_factor(nFactors, false);
-    std::vector<bool> is_obst_factor(nFactors, false);
-
-    for (const auto& entry : factor_types) {
-        if (entry.second == FactorType::Regularization) is_reg_factor[entry.first] = true;
-        if (entry.second == FactorType::FluxConservation) is_flux_factor[entry.first] = true;
-        if (entry.second == FactorType::Obstacle) is_obst_factor[entry.first] = true;
-    }
-    for (size_t i = nPriorFactors; i < nFactors; ++i) {
-        is_obs_factor[i] = true;
-    }
-    
-
-    // Compute the diagonal of H^-1 (required for LML gradient approximation)
-    Eigen::VectorXd H_diag_inv(Hsparse.rows());
-    for (int j = 0; j < Hsparse.rows(); ++j) {
-        Eigen::VectorXd e_j = Eigen::VectorXd::Zero(Hsparse.rows());
-        e_j(j) = 1.0;
-        H_diag_inv(j) = solver.solve(e_j)(j);
-    }
-
-    // Iterate over the columns of JsparseT to compute (J' * E_i * J)_k,k
-    auto compute_trace_term = [&](const std::vector<bool>& factor_mask) -> double {
-        double trace_term = 0.0;
-        
-        // Loop over the state dimensions (k)
-        for (int k = 0; k < Hsparse.rows(); ++k) {
-            // Compute (J' * E_i * J)_k,k = sum_{l in constraints_i} J_l,k^2
-            double J_E_J_diag_k = 0.0;
-            
-            // Loop over J rows (l) for column k
-            for (Eigen::SparseMatrix<double>::InnerIterator it(Jsparse, k); it; ++it) {
-                size_t row_idx = it.row();
-                if (row_idx < nFactors && factor_mask[row_idx]) {
-                    J_E_J_diag_k += it.value() * it.value();
-                }
-            }
-            
-            // Apply the diagonal approximation: Tr(A H^-1) ~ sum_k A_k,k * (H^-1)_k,k
-            trace_term += J_E_J_diag_k * H_diag_inv(k);
-        }
-        return trace_term;
-    };
-    
-    double trace_obs  = compute_trace_term(is_obs_factor);
-    double trace_reg  = compute_trace_term(is_reg_factor);
-    double trace_flux = compute_trace_term(is_flux_factor);
-    double trace_obst = compute_trace_term(is_obst_factor);
-    
-    // Apply Term 2 gradient: -0.5 * Tr(...)
-    gradientVec(0) += -0.5 * trace_obs;
-    gradientVec(1) += -0.5 * trace_reg;
-    gradientVec(2) += -0.5 * trace_flux;
-    gradientVec(3) += -0.5 * trace_obst;
-
-    
-    // Compute T3 (Prior Certainty) and its gradient T3_grad
-    // ---------------------------------------------------------------
-    // T3 = 0.5 * log(|Lambda|)
-    // T3_grad_i = 0.5 * N_i / lambda_i
-    
-    // N_i: number of factors for each lambda type
-    int N_obs = nObsFactors;
-    int N_reg = 0;
-    int N_flux = 0;
-    int N_obst = 0;
-    for (const auto& entry : factor_types) {
-        if (entry.second == FactorType::Regularization) N_reg++;
-        if (entry.second == FactorType::FluxConservation) N_flux++;
-        if (entry.second == FactorType::Obstacle) N_obst++;
-    }
-    
-    // T3 Value: log(|Lambda|) = sum_i (N_i * log(lambda_i))
-    double log_det_Lambda = N_obs * std::log(lambdaObservations) + 
-                            N_reg * std::log(lambdaPrior_reg) + 
-                            N_flux * std::log(lambdaPrior_flux_conservation) + 
-                            N_obst * std::log(lambdaPrior_obstacles);
-    T3 = 0.5 * log_det_Lambda;
-    
-    // T3 Gradient
-    gradientVec(0) += 0.5 * N_obs / lambdaObservations;
-    gradientVec(1) += 0.5 * N_reg / lambdaPrior_reg;
-    gradientVec(2) += 0.5 * N_flux / lambdaPrior_flux_conservation;
-    gradientVec(3) += 0.5 * N_obst / lambdaPrior_obstacles;
-    
-    // Final LML (Term 1 + Term 2 + Term 3) - Ignore the constant C
-    double LML = T1 + T2 + T3;
-
-    return {LML, gradientVec};
-}
 
 
 WindVector CGMRF_map::getEstimation(int index)

@@ -71,9 +71,9 @@ protected:
     double GMRF_lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
     double GMRF_lambdaPrior_flux_conservation; // Weight for flux conservation law prior
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
-    double GMRF_lambdaObs;     // [GMRF model] The initial information (Lambda) of each observation (this information will decrease with time)
-    double GMRF_lambdaObsLoss; // [GMRF model] The loss of information (Lambda) of the observations with each iteration (see AppTick)
-
+    double observation_var_wind_speed;          // Variance of the wind speed measurement (m/s)^2
+    double observation_var_wind_direction;      // Variance of the wind direction measurement (rad)^2
+    
     // Variables
     tf2_ros::Buffer::SharedPtr tf_buffer;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener;
