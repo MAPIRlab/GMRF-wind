@@ -1164,6 +1164,10 @@ WindVector CGMRF_map::getEstimation(int index)
         theta,                      // Direction
         sqrt(var_r),                // Sigma_mod
         sqrt(var_theta),            // Sigma_angle (radians)
+        x,                          // Cartesian x
+        y,                          // Cartesian y
+        stdevX,                     // Sigma_x
+        stdevY                      // Sigma_y
     };
 }
 

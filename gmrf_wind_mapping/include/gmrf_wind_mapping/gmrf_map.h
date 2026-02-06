@@ -36,15 +36,19 @@ struct TOccupancyMap
 // Data structure to return wind vector estimations
 struct WindVector
 {
+    // polar coordinates
     double module;
     double direction;
     double stdMod;
     double stdAngle;
+    // Cartesian coordinates
+    double x;
+    double y;
+    double stdX;
+    double stdY;
 
     Eigen::Vector2d asEigen()
     {
-        double x = module * std::cos(direction);
-        double y = module * std::sin(direction);
         return Eigen::Vector2d(x, y);
     }
 };
