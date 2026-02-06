@@ -328,7 +328,8 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
             Eigen::Vector2d vec = r.asEigen();
             res->u.push_back(vec.x());
             res->v.push_back(vec.y());
-            res->stdev_angle.push_back(r.stdDev);
+            double stdDev = sqrt(r.stdX * r.stdX + r.stdY * r.stdY);
+            res->stdev_angle.push_back(stdDev);
         }
 
         return true;
@@ -341,7 +342,8 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
         Eigen::Vector2d vec = r.asEigen();
         res->u.push_back(vec.x());
         res->v.push_back(vec.y());
-        res->stdev_angle.push_back(r.stdDev);
+        double stdDev = sqrt(r.stdX * r.stdX + r.stdY * r.stdY);
+        res->stdev_angle.push_back(stdDev);
     }
     return true;
 }
