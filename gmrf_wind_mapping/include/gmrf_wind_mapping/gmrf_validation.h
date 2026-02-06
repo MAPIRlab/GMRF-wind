@@ -43,7 +43,7 @@ public:
 
     void update();
     void publishMaps();
-    std::array<double, 3> compute_performance_metrics() const;
+    std::array<double, 4> compute_performance_metrics() const;
     void SimulateWindObservations(size_t N_obs);
     void update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles, double lambda_obs);
     void read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles, double &lambda_obs);
@@ -66,14 +66,15 @@ public:
         gmrf_map->MAP_estimation_GMRF();
         gmrf_map->computeUncertainty_GMRF();
 
-        // 3. Compute performance metrics (AAE, RMSE, NLPD)
-        std::array<double, 3> metrics = this->compute_performance_metrics();
-        double ANLPD = metrics[2]; // NLPD is the third element
+        // 3. Compute performance metrics (AAE, RMSE, ANSP, NLPD)
+        std::array<double, 4> metrics = this->compute_performance_metrics();
+        double AAE = metrics[0];  // AAE is the first element
+        double RMSE = metrics[1]; // RMSE is the second element
+        double ANSP = (-metrics[2]+1); // ANSP is the third element (normalized dot product, we want to maximize it. adding offset to allow negative values)
+        double ANLPD = metrics[3] + 20; // NLPD is the fourth element (adding offset to allow negative values)
 
-        // 4. Return Average NLPD as residual (we optimize for NLPD minimization)
-        // Since Ceres minimizes the squared residuals, we can just return the NLPD value directly
-        // Adding a constant offset to allow the NLPD can reach negative values
-        residual[0] = static_cast<T>(ANLPD+20);
+        // Metric to minimize
+        residual[0] = static_cast<T>(ANSP);
         return true;
     }
 
