@@ -128,11 +128,12 @@ namespace Utils
         double max_stdDev = 0.0;
         for (size_t i = 0; i < N; ++i)
         {
-            WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction; w.stdDev;
+            WindVector w = my_map.getEstimation(static_cast<int>(i));
             if (w.module > max_module)
                 max_module = w.module;
-            if (w.stdDev > max_stdDev)
-                max_stdDev = w.stdDev;
+            double stdDev = sqrt(w.stdX * w.stdX + w.stdY * w.stdY);
+            if (stdDev > max_stdDev)
+                max_stdDev = stdDev;
         }
 
         // Uncertainty is a single marker of type POINTS
@@ -153,7 +154,7 @@ namespace Utils
         for (size_t i = 0; i < N; ++i)
         {
             // Get wind estimation at cell i
-            WindVector w = my_map.getEstimation(static_cast<int>(i));       //w.module; w.direction;
+            WindVector w = my_map.getEstimation(static_cast<int>(i));
             Eigen::Vector2d vec = w.asEigen();                              //vec.x(); vec.y()
 
             // Cell center coordinates
@@ -171,7 +172,8 @@ namespace Utils
                 
                 std_msgs::msg::ColorRGBA color;
                 // color -> must normalize to [0-199]
-                get_arrow_color(w.stdDev, max_stdDev, color.r, color.g, color.b);
+                double stdDev = sqrt(w.stdX * w.stdX + w.stdY * w.stdY);
+                get_arrow_color(stdDev, max_stdDev, color.r, color.g, color.b);
                 color.a = 1.0;       // transparency
                 wind_std_array.colors.push_back(color);
             }
