@@ -4,4 +4,6 @@ float64[] y
 int64 map_width
 float64[] u
 float64[] v
-float64[] stdev_angle
+float64[] var_u
+float64[] var_v
+float64[] cov_uv
