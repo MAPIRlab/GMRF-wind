@@ -1,5 +1,7 @@
 float64[] wind_speed
 float64[] wind_direction
+float64[] var_speed
+float64[] var_direction
 float64[] x_pos
 float64[] y_pos
 ---
