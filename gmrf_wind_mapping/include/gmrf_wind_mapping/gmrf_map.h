@@ -17,8 +17,9 @@
 // Stores mean and standard deviation, as we build a "Gaussian" Random Field
 struct TRandomFieldCell
 {
-    double mean;
-    double std;
+    double mean; 
+    double var;         // Variance of the estimation (std^2)
+    double covariance;  // Covariance between Wx and Wy if needed
 };
 
 // Data structure to hold the occupancy map to which the GMRF is adapted
@@ -38,14 +39,16 @@ struct WindVector
 {
     // polar coordinates
     double module;
-    double direction;
-    double stdMod;
-    double stdAngle;
+    double angle; // in radians, in the map reference system (0 rad means wind blowing towards +X, pi/2 means wind blowing towards +Y)
+    double varMod;
+    double varAngle;
+    double covModAngle;
     // Cartesian coordinates
     double x;
     double y;
-    double stdX;
-    double stdY;
+    double varX;
+    double varY;
+    double covXY; // covariance between x and y components
 
     Eigen::Vector2d asEigen()
     {

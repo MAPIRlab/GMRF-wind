@@ -55,7 +55,8 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         //-------------------------
         TRandomFieldCell init_cell;
         init_cell.mean = 0.0;
-        init_cell.std = 0.0;
+        init_cell.var = 0.0;
+        init_cell.covariance = 0.0;
         m_map.assign(2 * N, init_cell); // Since we have Wx and Wy, we refer to them as: Wx in the range [0,N-1], Wy in the range [N,2N-1]
 
         if (verbose)
@@ -794,7 +795,8 @@ void CGMRF_map::MAP_estimation_GMRF()
         for (size_t j = 0; j < m_map.size(); j++)
         {
             m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
-            m_map[j].std = 0.0;             // Not estimated yet. We need inv(H) diagonal for that.
+            m_map[j].var = 0.0;             // Not estimated yet.
+            m_map[j].covariance = 0.0;             // Not estimated yet.
         }
 
         // Calculate the final residual vector (r = J*m - y)
@@ -820,6 +822,8 @@ void CGMRF_map::computeUncertainty_GMRF()
         if (estimateTiming) stdTimer.start(); // Start Timer for Uncertainty computation        
         
         size_t matrix_size = Hsparse.rows();
+        size_t N = matrix_size / 2;     // Number of cells
+
         if (Hsparse.cols() != matrix_size || matrix_size == 0)
         {
             std::cerr << "[GMRF-computeUncertainty_GMRF] Error: Hsparse is not a square matrix or is empty." << std::endl;
@@ -840,31 +844,28 @@ void CGMRF_map::computeUncertainty_GMRF()
             return;
         }
 
-        // --- ITERATIVE METHOD ---
-        // Not ideal, but... better than nothing
-        // Vector for the right-hand side (RHS) of H * x_j = e_j
-        Eigen::VectorXd e_j = Eigen::VectorXd::Zero(matrix_size);
+        // 2x2 covariance blocks for Wx and Wy of each cell
+        // ---------------------------------------------------------------------
+        Eigen::VectorXd e_j = Eigen::VectorXd::Zero(matrix_size); // Standard basis vector for selecting columns of H^-1
 
-        // 2. Loop through all state variables to solve H * x_j = e_j for each
-        for (size_t j = 0; j < matrix_size; ++j)
+        for (size_t j = 0; j < N; ++j)
         {
-            // Set e_j to be the j-th standard basis vector (1 at j, 0 elsewhere)
+            // --- Step 1: Solve for Wx column ---
             e_j.setZero();
             e_j(j) = 1.0;
+            Eigen::VectorXd col_x = solver.solve(e_j);
+            
+            m_map[j].var = std::max(0.0, col_x(j));             // Variance for Wx is the j-th diagonal element of H^-1
+            m_map[j].covariance = std::max(0.0,col_x(j + N));   // Cross-term links Wx and Wy
 
-            // Solve H * x_j = e_j. The j-th component of the solution x_j is the variance: (H^-1)_{j,j}.
-            Eigen::VectorXd x_j = solver.solve(e_j);
+            // --- Step 2: Solve for Wy column ---
+            e_j.setZero();
+            e_j(j + N) = 1.0;
+            Eigen::VectorXd col_y = solver.solve(e_j);
             
-            double variance = x_j(j);
-            
-            // 3. Update the standard deviation (uncertainty) in the map state
-            if (variance > 0.0) {
-                m_map[j].std = std::sqrt(variance); 
-            } else {
-                // Should not happen for a positive definite matrix, but handles numerical safety
-                m_map[j].std = 0.0;
-            }
-        }
+            m_map[j+N].var = std::max(0.0, col_y(j + N));   // Variance for Wy is the (j+N)-th diagonal element of H^-1
+            m_map[j+N].covariance = col_x(j + N);           // Cross-term is the same as before (symmetric)
+        }        
         
         if (verbose)
              std::cerr << "[GMRF] Uncertainty computation complete." << std::endl;
@@ -893,10 +894,11 @@ WindVector CGMRF_map::getEstimation(int index)
     // index: cell index for Wx, index + N: cell index for Wy    
     double x = m_map[index].mean;
     double y = m_map[index + N].mean;
-    double stdevX = std::max(0.001, m_map[index].std);
-    double vx = stdevX * stdevX;
-    double stdevY = std::max(0.001, m_map[index + N].std);
-    double vy = stdevY * stdevY;
+    double vx = std::max(0.0001, m_map[index].var);
+    double vy = std::max(0.0001, m_map[index + N].var);
+    double cov_xy = m_map[index].covariance; // covariance between Wx and Wy
+    double stdevX = sqrt(vx);
+    double stdevY = sqrt(vy);
 
     // We convert to polar coordinates (module, direction) and propagate uncertainties
     double r = sqrt(pow(x, 2) + pow(y, 2));
@@ -909,22 +911,22 @@ WindVector CGMRF_map::getEstimation(int index)
     double dth_dy = x / (r*r);
 
     // Uncertainty propagation: Sigma_polar = J * Sigma_cartesian * J^T
-    // Assuming independence between x and y (no covariance) --> Sigma_cartesian = [vx 0; 0 vy]
-    // Resulting Sigma_r^2 = (dr/dx)^2 * vx + (dr/dy)^2 * vy
-    double var_r = (dr_dx * dr_dx * vx) + (dr_dy * dr_dy * vy);    
-    // Resulting Sigma_theta^2 = (dth/dx)^2 * vx + (dth/dy)^2 * vy
+    double var_r = (dr_dx * dr_dx * vx) + (dr_dy * dr_dy * vy);
     double var_theta = (dth_dx * dth_dx * vx) + (dth_dy * dth_dy * vy);
+    double cov_r_theta = (dr_dx * dth_dx * vx) + (dr_dy * dth_dy * vy) + (dr_dx * dth_dy + dr_dy * dth_dx) * cov_xy;
 
     return {
         r,                          // Module
         theta,                      // Direction
-        sqrt(var_r),                // Sigma_mod
-        sqrt(var_theta),            // Sigma_angle (radians)
+        var_r,                      // Sigma_mod
+        var_theta,                  // Sigma_angle (radians)
+        cov_r_theta,                // Covariance between module and angle
         x,                          // Cartesian x
         y,                          // Cartesian y
-        stdevX,                     // Sigma_x
-        stdevY                      // Sigma_y
-    };
+        vx,                         // Sigma_x
+        vy,                         // Sigma_y
+        cov_xy                      // Covariance between x and y
+        };
 }
 
 WindVector CGMRF_map::getEstimation(double x, double y)
