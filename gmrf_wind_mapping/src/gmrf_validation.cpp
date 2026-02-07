@@ -547,37 +547,64 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
                 // ===================================================
                 try
                 {
-                    // Cartesian NLPD computation
-                    //==============================
-                    /*
-                    double mahalanobis_distance_squared = (pow(gt_x - est_x, 2) / (est_stdX * est_stdX + 1e-6)) +
-                                                        (pow(gt_y - est_y, 2) / (est_stdY * est_stdY + 1e-6));
-                    NLPD = 0.5 * mahalanobis_distance_squared + std::log(est_stdX) + std::log(est_stdY) + std::log(2 * M_PI);
-                    */
+                    // 4.1 Cartesian NLPD (full covariance Gaussian in X and Y)
+                    //=========================================
+                    // Calculate residuals
+                    double dx = gt_x - est_x;
+                    double dy = gt_y - est_y;
 
-                    // weighthed Polar NLPD computation
-                    //==============================
+                    // Calculate the determinant of the covariance matrix
+                    // Adding a tiny epsilon to ensure numerical stability/invertibility
+                    double det = (est_varX * est_varY) - (est_covXY * est_covXY);
+                    double epsilon = 1e-9;
+                    if (det < epsilon) det = epsilon; 
+
+                    // Compute the Mahalanobis Distance squared (the quadratic form)
+                    // Formula: (1/det) * [dx, dy] * [varY, -covXY; -covXY, varX] * [dx; dy]
+                    double mahalanobis_sq = (1.0 / det) * (
+                        dx * dx * est_varY + 
+                        dy * dy * est_varX - 
+                        2.0 * dx * dy * est_covXY
+                    );
+
+                    // Calculate NLPD
+                    double nlpd_cart = 0.5 * (mahalanobis_sq + std::log(det) + 2.0 * std::log(2.0 * M_PI));
+
+
+                    // 4.2 weighthed Polar NLPD computation
+                    //=========================================
                     const double w_mag = 0.3;
                     const double w_dir = 0.7;
 
-                    // 1. Angular difference (with wrap-around handling)
-                    double diff_theta = gt_direction - est_direction;
-                    while (diff_theta > M_PI)  diff_theta -= 2.0 * M_PI;
-                    while (diff_theta < -M_PI) diff_theta += 2.0 * M_PI;
+                    // Residuals
+                    double dMod = gt_module - est_module;
+                    double dAng = gt_direction - est_direction;
 
-                    // 2. Magnitude difference
-                    double diff_r = gt_module - est_module;
+                    // Normalize angle difference to [-PI, PI] to avoid jumps at the boundary
+                    while (dAng > M_PI) dAng -= 2.0 * M_PI;
+                    while (dAng < -M_PI) dAng += 2.0 * M_PI;
 
-                    // 3. Variances (ensure these are passed as polar sigmas)
+                    // Covariance Matrix (using Jacobian to propagate from Cartesian to Polar)
                     double var_r = std::max(1e-6, est_varModule);
                     double var_theta = std::max(1e-6, est_varDirection);
+                    double cov_r_theta = est_covModuleDirection;
 
-                    // 4. Polar NLPD components (magnitude and direction)                    
-                    double nlpd_r = 0.5 * ((diff_r * diff_r / var_r) + std::log(2 * M_PI * var_r));
-                    double nlpd_theta = 0.5 * ((diff_theta * diff_theta / var_theta) + std::log(2 * M_PI * var_theta));
+                    // Calculate Determinant and Mahalanobis for Polar NLPD
+                    double detP = (var_r * var_theta) - (cov_r_theta * cov_r_theta);
+                    if (detP < 1e-9) detP = 1e-9;
 
-                    // 5. Final Weighted NLPD
-                    NLPD = (w_mag * nlpd_r) + (w_dir * nlpd_theta);
+                    double mahalanobis_sq_polar = (1.0 / detP) * (
+                        dMod * dMod * var_theta + 
+                        dAng * dAng * var_r - 
+                        2.0 * dMod * dAng * cov_r_theta
+                    );
+
+                    double nlpd_polar = 0.5 * (mahalanobis_sq_polar + std::log(detP) + 2.0 * std::log(2.0 * M_PI));
+
+
+                    // NLPD to consider (cartesian or polar)
+                    //=========================================
+                    NLPD = nlpd_cart;
                     
                     // Accumulate
                     sum_NLPD += NLPD;
