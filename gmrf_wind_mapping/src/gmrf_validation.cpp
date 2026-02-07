@@ -455,15 +455,16 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
                 // Get GMRF estimation at cell i (polars)
                 WindVector est_wind = gmrf_map->getEstimation(i);
                 double est_module = est_wind.module;
-                double est_direction = est_wind.direction;
-                double est_stdModule = est_wind.stdMod;
-                double est_stdDirection = est_wind.stdAngle;
-                double est_stdUnified = sqrt(pow(est_stdModule, 2) + pow(est_module * est_stdDirection, 2));
+                double est_direction = est_wind.angle;
+                double est_varModule = est_wind.varMod;
+                double est_varDirection = est_wind.varAngle;
+                double est_covModuleDirection = est_wind.covModAngle;
                 // Cartesian (for plotting and metrics)
                 double est_x = est_wind.x;
                 double est_y = est_wind.y;
-                double est_stdX = est_wind.stdX;
-                double est_stdY = est_wind.stdY;
+                double est_varX = est_wind.varX;
+                double est_varY = est_wind.varY;
+                double est_covXY = est_wind.covXY;
                 
                 // Get GT wind at cell i
                 WindVectorXY gt_wind = gt_map[i];
@@ -568,8 +569,8 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
                     double diff_r = gt_module - est_module;
 
                     // 3. Variances (ensure these are passed as polar sigmas)
-                    double var_r = std::max(1e-6, est_stdModule * est_stdModule);
-                    double var_theta = std::max(1e-6, est_stdDirection * est_stdDirection);
+                    double var_r = std::max(1e-6, est_varModule);
+                    double var_theta = std::max(1e-6, est_varDirection);
 
                     // 4. Polar NLPD components (magnitude and direction)                    
                     double nlpd_r = 0.5 * ((diff_r * diff_r / var_r) + std::log(2 * M_PI * var_r));
@@ -661,8 +662,9 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
     csv_file << "cell_index,"
              << "gmrf_wind_x,"
              << "gmrf_wind_y,"
-             << "gmrf_std_x,"
-             << "gmrf_std_y,"
+             << "gmrf_var_x,"
+             << "gmrf_var_y,"
+             << "gmrf_cov_xy,"
              << "gt_wind_x,"
              << "gt_wind_y\n";
 
@@ -675,8 +677,9 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
             WindVector est_wind = gmrf_map->getEstimation(i);
             double est_x = est_wind.x;
             double est_y = est_wind.y;
-            double est_stdX = est_wind.stdX;
-            double est_stdY = est_wind.stdY;
+            double est_varX = est_wind.varX;
+            double est_varY = est_wind.varY;
+            double est_covXY = est_wind.covXY;
 
             // Get GT wind at cell i
             WindVectorXY gt_wind = gt_map[i];
@@ -687,8 +690,9 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
             csv_file << i << ","
                      << est_x << ","
                      << est_y << ","
-                     << est_stdX << ","
-                     << est_stdY << ","
+                     << est_varX << ","
+                     << est_varY << ","
+                     << est_covXY << ","
                      << gt_x << ","
                      << gt_y << "\n";
         }

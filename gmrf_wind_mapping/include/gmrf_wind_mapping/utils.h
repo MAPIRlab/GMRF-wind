@@ -125,18 +125,20 @@ namespace Utils
 
         // Get max wind vector in the map (to normalize the plot)
         double max_module = 0.0;
-        double max_stdDev = 0.0;
+        double max_var = 0.0;
         for (size_t i = 0; i < N; ++i)
         {
             WindVector w = my_map.getEstimation(static_cast<int>(i));
+            // module 
             if (w.module > max_module)
                 max_module = w.module;
-            double stdDev = sqrt(w.stdX * w.stdX + w.stdY * w.stdY);
-            if (stdDev > max_stdDev)
-                max_stdDev = stdDev;
+            // Uncertainty (det of Sigma). Can also consider the Trace of Sigma or the max eigenvalue
+            double detSigma = sqrt(w.varX * w.varY - w.covXY * w.covXY);
+            if (detSigma > max_var)
+                max_var = detSigma;
         }
 
-        // Uncertainty is a single marker of type POINTS
+        // Uncertainty is a single marker of type POINTS (heatMap of uncertainty)
         wind_std_array.header.frame_id = frame_id;
         wind_std_array.header.stamp = rclcpp::Time(0);
         wind_std_array.ns = "gmrf_wind_stddev";
@@ -147,7 +149,7 @@ namespace Utils
         wind_std_array.scale.x = cell_size;
         wind_std_array.scale.y = cell_size;
 
-        // And one ARROW/POINTS marker per cell for wind_vector/stdDev
+        // And one ARROW/POINTS marker per cell for wind_vector/var
         wind_array.markers.reserve(N);
         wind_std_array.points.reserve(N);
         wind_std_array.colors.reserve(N);
@@ -161,7 +163,7 @@ namespace Utils
             double cx = 0.0, cy = 0.0;
             my_map.id2xy_public(i, cx, cy);
 
-            // Point marker for stdDev
+            // Point marker for Uncertainty
             {
                 // Add one point at the cell center
                 geometry_msgs::msg::Point p;
@@ -172,8 +174,9 @@ namespace Utils
                 
                 std_msgs::msg::ColorRGBA color;
                 // color -> must normalize to [0-199]
-                double stdDev = sqrt(w.stdX * w.stdX + w.stdY * w.stdY);
-                get_arrow_color(stdDev, max_stdDev, color.r, color.g, color.b);
+                // Uncertainty (det of Sigma). Can also consider the Trace of Sigma or the max eigenvalue
+                double detSigma = sqrt(w.varX * w.varY - w.covXY * w.covXY);
+                get_arrow_color(detSigma, max_var, color.r, color.g, color.b);
                 color.a = 1.0;       // transparency
                 wind_std_array.colors.push_back(color);
             }

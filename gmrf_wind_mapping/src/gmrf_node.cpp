@@ -322,16 +322,18 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
 
         res->u.reserve(size);
         res->v.reserve(size);
-        res->stdev_angle.reserve(size);
+        res->var_u.reserve(size);
+        res->var_v.reserve(size);
+        res->cov_uv.reserve(size);
 
         for (int i = 0; i < size; i++)
         {
             WindVector r = my_map->getEstimation(i);
-            Eigen::Vector2d vec = r.asEigen();
-            res->u.push_back(vec.x());
-            res->v.push_back(vec.y());
-            double stdDev = sqrt(r.stdX * r.stdX + r.stdY * r.stdY);
-            res->stdev_angle.push_back(stdDev);
+            res->u.push_back(r.x);
+            res->v.push_back(r.y);
+            res->var_u.push_back(r.varX);
+            res->var_v.push_back(r.varY);
+            res->cov_uv.push_back(r.covXY);
         }
 
         return true;
@@ -341,11 +343,11 @@ bool Cgmrf::get_wind_value_srv(WindEstimation::Request::SharedPtr req, WindEstim
     for (int i = 0; i < req->x.size(); i++)
     {
         WindVector r = my_map->getEstimation(req->x[i], req->y[i]);
-        Eigen::Vector2d vec = r.asEigen();
-        res->u.push_back(vec.x());
-        res->v.push_back(vec.y());
-        double stdDev = sqrt(r.stdX * r.stdX + r.stdY * r.stdY);
-        res->stdev_angle.push_back(stdDev);
+        res->u.push_back(r.x);
+        res->v.push_back(r.y);
+        res->var_u.push_back(r.varX);
+        res->var_v.push_back(r.varY);
+        res->cov_uv.push_back(r.covXY);
     }
     return true;
 }
