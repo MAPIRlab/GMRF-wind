@@ -689,7 +689,7 @@ void CGMRF_map::MAP_estimation_GMRF()
         size_t count = nPriorFactors;       // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
-            bool x_y_independent = true;
+            bool x_y_independent = false;
 
             if (x_y_independent)
             {
@@ -713,9 +713,7 @@ void CGMRF_map::MAP_estimation_GMRF()
             else
             {
                 // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
-                // we would need to introduce off-diagonal terms in Lambda.
-
-                    
+                // we would need to introduce off-diagonal terms in Lambda.                    
 
                 double var_xx = ito->var_xx;
                 double var_yy = ito->var_yy;
@@ -897,14 +895,12 @@ WindVector CGMRF_map::getEstimation(int index)
     double vx = std::max(0.0001, m_map[index].var);
     double vy = std::max(0.0001, m_map[index + N].var);
     double cov_xy = m_map[index].covariance; // covariance between Wx and Wy
-    double stdevX = sqrt(vx);
-    double stdevY = sqrt(vy);
-
+    
     // We convert to polar coordinates (module, direction) and propagate uncertainties
-    double r = sqrt(pow(x, 2) + pow(y, 2));
-    double theta = atan2(y, x);
+    double r = sqrt(pow(x, 2) + pow(y, 2)) + 1e-6;  // Add small epsilon for numerical stability if r approx 0
+    double theta = atan2(y, x);                     // Direction in radians, range [-pi, pi]
 
-    // Jacobian elements
+    // Jacobian elements: Cartesian to Polar transformation
     double dr_dx = x / r;
     double dr_dy = y / r;
     double dth_dx = -y / (r*r);
