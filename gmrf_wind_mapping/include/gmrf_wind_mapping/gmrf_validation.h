@@ -74,7 +74,7 @@ public:
         double ANLPD = metrics[3] + 20; // NLPD is the fourth element (adding offset to allow negative values)
 
         // Metric to minimize
-        residual[0] = static_cast<T>(ANSP);
+        residual[0] = static_cast<T>(ANLPD);
         return true;
     }
 
@@ -105,6 +105,7 @@ public:
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
     double observation_var_wind_speed;          // Variance of the wind speed measurement (m/s)^2
     double observation_var_wind_direction;      // Variance of the wind direction measurement (rad)^2
+    int experiment_number;                     // Number of the experiment to run
     
     // Variables
     boost::mutex mutex_anemometer;

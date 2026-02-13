@@ -44,6 +44,9 @@ Cvalgt::Cvalgt()
     GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
     GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
+
+    // Experiment
+     experiment_number = declare_parameter<int>("experiment_number", 0);
     
 
     // Publishers
@@ -349,12 +352,29 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
     
     // Clear previous observations
     gmrf_map->clearObservations_GMRF();
+    std::vector<size_t> observed_cells; // To keep track of which cells have been observed
 
     // Add N random observations from the GT map
     for (size_t i = 0; i < N_obs; ++i)
     {
         // 3. Generate and Return the Random Number
         int idx = distrib(gen);
+
+        // Ensure we don't sample the same cell multiple times
+        while (std::find(observed_cells.begin(), observed_cells.end(), idx) != observed_cells.end())
+        {
+            idx = distrib(gen);
+        }
+
+        // Ensure cell is free
+        if (!gmrf_map->is_cell_free(idx))
+        {
+            --i; // If cell is not free, we don't count this iteration and try again
+            continue;
+        }
+        
+        // Add to observed cells list
+        observed_cells.push_back(idx);
         
         // Read GT wind at that cell
         double wind_speed_x = gt_map[idx].x;
@@ -362,13 +382,17 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
         double module = sqrt(pow(wind_speed_x,2) + pow(wind_speed_y,2));
         double direction = atan2(wind_speed_y, wind_speed_x);
 
+        // Add gaussian noise to the observation
+        std::normal_distribution<> noise_speed(0.0, sqrt(observation_var_wind_speed));
+        std::normal_distribution<> noise_direction(0.0, sqrt(observation_var_wind_direction));
+
         // Cell center coordinates
         double x_pos_meters, y_pos_meters;
         x_pos_meters = gmrf_map->map_dimensions_meters()[0] + (idx % dimensions.x() + 0.5) * cell_size;
         y_pos_meters = gmrf_map->map_dimensions_meters()[2] + (idx / dimensions.x() + 0.5) * cell_size;
 
         // Insert observation
-        gmrf_map->insertObservation_GMRF(module, direction, observation_var_wind_speed, observation_var_wind_direction, x_pos_meters, y_pos_meters);
+        gmrf_map->insertObservation_GMRF(module + noise_speed(gen), direction + noise_direction(gen), observation_var_wind_speed, observation_var_wind_direction, x_pos_meters, y_pos_meters);
         if (verbose)
             RCLCPP_INFO(get_logger(), "[Cvalgt] Inserting observation %zu: speed=%.2f m/s, direction=%.2f rad, pos=(%.2f, %.2f) m", 
                         i, module, direction, x_pos_meters, y_pos_meters);
@@ -529,7 +553,7 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
                     double dot_product = est_x * gt_x + est_y * gt_y;
                     double gt_magnitude_squared = gt_x * gt_x + gt_y * gt_y;
                     double est_magnitude_squared = est_x * est_x + est_y * est_y;
-                    double c = 0.0001;  // small constant to avoid division by zero
+                    double c = 0.001;  // small constant to avoid division by zero
 
                     // NSP computation, range [-1, 1]
                     // 1: perfect alignment, -1: opposite direction, 0: orthogonal
@@ -556,7 +580,7 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
                     // Calculate the determinant of the covariance matrix
                     // Adding a tiny epsilon to ensure numerical stability/invertibility
                     double det = (est_varX * est_varY) - (est_covXY * est_covXY);
-                    double epsilon = 1e-9;
+                    double epsilon = 1e-6;
                     if (det < epsilon) det = epsilon; 
 
                     // Compute the Mahalanobis Distance squared (the quadratic form)
@@ -573,9 +597,6 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
 
                     // 4.2 weighthed Polar NLPD computation
                     //=========================================
-                    const double w_mag = 0.3;
-                    const double w_dir = 0.7;
-
                     // Residuals
                     double dMod = gt_module - est_module;
                     double dAng = gt_direction - est_direction;
@@ -591,7 +612,7 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
 
                     // Calculate Determinant and Mahalanobis for Polar NLPD
                     double detP = (var_r * var_theta) - (cov_r_theta * cov_r_theta);
-                    if (detP < 1e-9) detP = 1e-9;
+                    if (detP < 1e-6) detP = 1e-6;
 
                     double mahalanobis_sq_polar = (1.0 / detP) * (
                         dMod * dMod * var_theta + 
@@ -790,10 +811,8 @@ int main(int argc, char** argv)
     // 1- Optimize Lambda parameters (scenario, wind, Nobs)
     // 2- Simple GMRF estimation with fixed Lambdas
     //=========================================
-    int experiment = 1;
     
-
-    switch (experiment)
+    switch (my_gmrf_map->experiment_number)
     {
     case 1: //Optimize Lambda parameters with NLPD (scenario, wind, Nobs)
     {
@@ -843,7 +862,7 @@ int main(int argc, char** argv)
         Eigen::Vector2i dimensions = my_gmrf_map->gmrf_map->map_size();
         int max_obs = dimensions.x() * dimensions.y();
         max_obs = 100; // Limit to 100 observations for testing
-        for (int i = 10; i <= max_obs; i += 10) 
+        for (int i = 50; i <= max_obs; i += 10) 
         {
             std::cerr << "================== Optimizing for N_obs = " << i << " ==================\n";
             
@@ -984,15 +1003,12 @@ int main(int argc, char** argv)
         // Simple GMRF estimation with fixed Lambdas
         // =========================================
 
-        // Define the set of values you want to test
-        std::vector<double> test_values = {0.01, 0.1, 1.0, 10.0, 100.0, 1000.0};
-
         // Initial values for the 3 Lambda parameters (Reg, Flux, Obstacles)
         double parameters[3] = {my_gmrf_map->GMRF_lambdaPrior_reg, 
                                 my_gmrf_map->GMRF_lambdaPrior_flux_conservation, 
                                 my_gmrf_map->GMRF_lambdaPrior_obstacles};
 
-        // Simulate 50 random observations (wont change during the test)
+        // Simulate 50 noisy random observations (wont change during the test)
         my_gmrf_map->SimulateWindObservations(50);
 
         // Update GMRF with new lambda values
@@ -1011,6 +1027,9 @@ int main(int argc, char** argv)
         break;
 
         // Iterate over each of the 3 parameter positions
+        // Define the set of values you want to test
+        std::vector<double> test_values = {0.01, 0.1, 1.0, 10.0, 100.0, 1000.0};
+
         for (int i = 0; i < 3; ++i) 
         {
             double original_val = parameters[i]; // Store original to reset later
