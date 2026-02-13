@@ -40,7 +40,7 @@ def plot_optimization_results(df):
         axes[i].grid(True, linestyle=':', alpha=0.6)
 
     # 4. Plot Lambda parameters evolution for Optimal only
-    lambdas = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles', 'Lambda_Observations']
+    lambdas = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles']
     for l_col in lambdas:
         line = axes[3].plot(df_optimal['Repetition'], df_optimal[l_col], 
                      marker='s', markersize=4, label=f'Opt: {l_col}')
@@ -67,7 +67,7 @@ def plot_optimization_results(df):
 if __name__ == "__main__":
     
     # 1. Load your data
-    file_name = "NLPD_optimization_results_central_obstacle_05ms_phase1/Lambda_values_obs_50.csv"
+    file_name = "NLPD_optimization_results_central_obstacle_1ms/Lambda_values_obs_50.csv"
     df = pd.read_csv(file_name)
 
     # Call the plotting function

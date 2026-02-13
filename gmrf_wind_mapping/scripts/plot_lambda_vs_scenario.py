@@ -12,20 +12,20 @@ import re
 # ----------------------------------
 # 1. CONFIGURATION
 # ----------------------------------
-folders = [#'NLPD_optimization_results_central_obstacle_01ms_phase1', 
-           #'NLPD_optimization_results_central_obstacle_05ms_phase1', 
-           #'NLPD_optimization_results_central_obstacle_1ms_phase1',
-           #'NLPD_optimization_results_snake_01ms_phase1',
-           #'NLPD_optimization_results_snake_05ms_phase1',
-           #'NLPD_optimization_results_snake_1ms_phase1',
-           'NSP_optimization_results_central_obstacle_01ms', 
-           'NSP_optimization_results_central_obstacle_05ms', 
-           'NSP_optimization_results_central_obstacle_1ms',
+folders = [#'NLPD_optimization_results_central_obstacle_01ms', 
+           #'NLPD_optimization_results_central_obstacle_05ms', 
+           'NLPD_optimization_results_central_obstacle_1ms',
+           #'NLPD_optimization_results_snake_01ms',
+           #'NLPD_optimization_results_snake_05ms',
+           #'NLPD_optimization_results_snake_1ms',
+           #'NSP_optimization_results_central_obstacle_01ms', 
+           #'NSP_optimization_results_central_obstacle_05ms', 
+           #'NSP_optimization_results_central_obstacle_1ms',
            #'NSP_optimization_results_snake_01ms',
            #'NSP_optimization_results_snake_05ms',
            #'NSP_optimization_results_snake_1ms',
            ]
-lambda_cols = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles', 'Lambda_Observations']
+lambda_cols = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles']
 cleaned_data_list = []
 folder_general_medians = []
 

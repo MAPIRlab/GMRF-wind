@@ -20,19 +20,21 @@ def launch_setup(context, *args, **kwargs):
     gmrf_wind = Node(
         package="gmrf_wind_mapping",
         executable="gmrf_validation",
-        name="gmrf",
+        name="gmrf_val",
+        # prefix="xterm -e gdb --args",
         parameters=[
-            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_snake", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
-            {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_snake", "wind_simulations", "01ms", "wind_at_cell_centers_0.csv")},                                 # Path to a CSV file containing the CFD ground-truth wind data
+            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_central_obstacle", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_central_obstacle", "wind_simulations", "01ms", "wind_at_cell_centers_0.csv")},                                 # Path to a CSV file containing the CFD ground-truth wind data
             {"cell_size": 0.3},                               # Size of each cell in the GMRF grid (meters)
             {"verbose": False},                               # Verbose mode for debugging
             {"visualize_gmrf": False},                        # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"observation_var_wind_speed": 0.0001},           # Variance of the wind speed measurement (m/s)^2
-            {"observation_var_wind_direction": 0.0001},       # Variance of the wind direction measurement (rad)^2
-            {"GMRF_lambdaPrior_flux_conservation": 0.01},     # Flux conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_reg": 0.01},                   # Regularization -> neighbour cells have similar wind vectors
-            {"GMRF_lambdaPrior_obstacles": 0.01},             # Obstacles --> cells close to obstacles has only tangencial wind
+            {"observation_var_wind_speed": 0.0025},           # Variance of the wind speed measurement (m/s)^2
+            {"observation_var_wind_direction": 0.0025},       # Variance of the wind direction measurement (rad)^2
+            {"GMRF_lambdaPrior_flux_conservation": 10.0},     # Flux conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_reg": 0.1},                    # Regularization -> neighbour cells have similar wind vectors
+            {"GMRF_lambdaPrior_obstacles": 0.1},              # Obstacles --> cells close to obstacles has only tangencial wind
+            {"experiment_number": 1},                         # 1: Full Optimization, 2: Fixed lambdas.
         ]
     )
 
@@ -48,7 +50,7 @@ def launch_setup(context, *args, **kwargs):
     
     
     actions = []    
-    actions.append(rviz)
+    #actions.append(rviz)
     actions.append(gmrf_wind)
     return actions
 

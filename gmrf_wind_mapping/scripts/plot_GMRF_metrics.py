@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 
 # Configuration
-metrics_file = "NSP_optimization_results_central_obstacle_1ms/gmrf_opt_metrics_lambda_Nobs.csv"
+metrics_file = "NLPD_optimization_results_central_obstacle_05ms/gmrf_opt_metrics_lambda_Nobs.csv"
 base_name = os.path.splitext(metrics_file)[0]
 out_file = base_name + '.png'
 output_dir = "metrics_plots"
@@ -65,11 +65,10 @@ def main():
     ax1.legend()
 
     # --- Plot 2: Lambda Parameters with Uncertainty (Std) ---
-    lambda_pairs = [
-        ('Lambda_Reg_mean', 'Lambda_Reg_std'),
+    lambda_pairs = [        
         ('Lambda_Flux_mean', 'Lambda_Flux_std'),
         ('Lambda_Obstacles_mean', 'Lambda_Obstacles_std'),
-        ('Lambda_Observations_mean', 'Lambda_Observations_std')
+        ('Lambda_Reg_mean', 'Lambda_Reg_std')
     ]
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
     markers = ['o', 's', '^', 'd']
