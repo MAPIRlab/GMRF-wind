@@ -84,10 +84,17 @@ struct TimeStats {
 
 // Enum for the Factor Types
 enum class FactorType {
-    Regularization,
+    MassConservation,
+    Vorticity,
+    Observation,    
     Obstacle,
-    FluxConservation,
-    Observation
+    Regularization
+};
+
+struct FactorInfo {
+    size_t row_idx;    // El 'count' que identifica la fila en J y Lambda
+    FactorType type;   // Tipo de factor (MassConservation, Vorticity, etc.)
+    size_t cell_idx;   // El índice 'j' de la celda central asociada al factor
 };
 
 class CGMRF_map
@@ -98,7 +105,7 @@ public:
     CGMRF_map(  const TOccupancyMap& oc_map, 
                 float cell_size,
                 double m_lambdaPrior_reg,
-                double m_lambdaPrior_flux_conservation, 
+                double m_lambdaPrior_mass_conservation, 
                 double m_lambdaPrior_obstacles,
                 bool verbose,
                 bool estimateTiming
@@ -108,8 +115,8 @@ public:
     // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
     void clearObservations_GMRF();
-    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles);
-    void read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles);
+    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles);
+    void read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_mass_conservation, double &m_lambdaPrior_obstacles);
    
     // GMRF Estimation
     void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
@@ -158,9 +165,11 @@ protected:
     size_t nPriorFactors;                 // Static factors (dont change over time)
     size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
-    double lambdaPrior_reg;               // Weight for regularization prior -> neighbour cells have similar wind vectors
-    double lambdaPrior_flux_conservation; // Weight for flux conservation law prior
-    double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    double lambdaPrior_reg;               // Weight for regularization prior
+    double lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
+    double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
+    double lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
+    std::vector<int> m_cells_to_obs;        // Distance in cells to the closest obstacle
     
     struct TobservationGMRF
     {
@@ -183,7 +192,7 @@ protected:
     // GMRF Matrices and Structures
     std::vector<Eigen::Triplet<double>> J;          // Jacobian
     std::vector<Eigen::Triplet<double>> Lambda;     // the information matrix (weights or inverse of covariances)
-    std::vector<std::pair<size_t, FactorType>> factor_types; // Is the Lambda matrix, but with the type of each factor
+    std::vector<FactorInfo> factor_types;           // Vector with the type of each factor
     std::vector<TobservationGMRF> activeObs;        // Vector with the active observations and their respective Information
     Eigen::SparseMatrix<double> Jsparse;            // Sparse Jacobian matrix
     Eigen::SparseMatrix<double> Hsparse;            // Sparse Information matrix (H = J' * Lambda * J)
@@ -194,7 +203,8 @@ protected:
 
     // Util Functions
     bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
-    double getLambdaValue(FactorType type) const;
+    double getLambdaValue(FactorType type, size_t cell_idx) const;
+    void computeDistanceTransform();
 
     int xy2idx(float x, float y) const;
     void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);

@@ -2,6 +2,7 @@
 #include <cstdio>   // Necesario para fprintf
 #include <iostream>
 #include <iomanip>  // Necesario para std::setprecision
+#include <queue>
 
 
 /*---------------------------------------------------------------
@@ -10,7 +11,7 @@
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                      float cell_size, 
                      double m_lambdaPrior_reg,
-                     double m_lambdaPrior_flux_conservation, 
+                     double m_lambdaPrior_mass_conservation, 
                      double m_lambdaPrior_obstacles,
                      bool verbose,
                      bool estimateTiming=false)
@@ -25,7 +26,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
         m_resolution = cell_size; // Desired resolution to build the GMRF (m)
         lambdaPrior_reg = m_lambdaPrior_reg;
-        lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
+        lambdaPrior_mass_conservation = m_lambdaPrior_mass_conservation;
         lambdaPrior_obstacles = m_lambdaPrior_obstacles;
         // Compute SQRT values
         
@@ -100,204 +101,55 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             size_t jx, jy;
             id2cellxy(j, jx, jy);
 
-            if (!is_cell_free(j))
+            // -----------------------------------
+            // --- 3.1 REGULARIZATION (Wx=Wy=0) --
+            // -----------------------------------
+            // This applies to all cells (ocupied or not), since we want to force the estimation to be 0 at cells with no information
             {
-                // Cell is occupied in the provided OccupancyGrid --> Estimation here has no sense
-                // Since we cannot remove this cell, we will force Wx=0 and Wy=0
-                // Wx(j) = 0               
-                Eigen::Triplet<double> J_entry(count, j, 1);
-                J.push_back(J_entry);
-                factor_types.push_back({count, FactorType::Obstacle});
-                //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry);
+                // Regularization for Wx: 1.0 * Wx(j) = 0
+                J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                factor_types.push_back({count, FactorType::Regularization, j});
                 count++;
-                // Wy(j) = 0
-                Eigen::Triplet<double> J_entry2(count, j + N, 1);               
-                J.push_back(J_entry2);
-                factor_types.push_back({count, FactorType::Obstacle});
-                //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry2);
+
+                // Regularization for Wy: 1.0 * Wy(j) = 0
+                J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                factor_types.push_back({count, FactorType::Regularization, j});
                 count++;
             }
 
-            // 3.1 Regularization and Obstacle based Factors with the right node: (j <--> j+1)
-            //----------------------------------------------------------------------------------
-            if (jx < (m_size_x - 1))
-            {
-                if (is_cell_free(j) && is_cell_free(size_t(j + 1)))
-                {
-                    if (check_connectivity_between2cells(j, size_t(j + 1)))
-                    {
-                        // Regularization Factor: cells j and j+1 should have similar wind values
-                        // Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1);
-                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1);
-                        J.push_back(J_entry1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Regularization});
-                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry);
-                        count++;
-
-                        // Wy range [N+1,2N]                        
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
-                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1);
-                        J.push_back(J_entry3);
-                        J.push_back(J_entry4);
-                        factor_types.push_back({count, FactorType::Regularization});
-                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry2);
-                        count++;
-                    }
-                    else
-                    {
-                        // An obstacle is in between cells j and j+1
-                        // 1. Do not create a regularization link
-                        // 2. Force Wx=0 at both cells
-                        // Wx(j) = 0
-                        Eigen::Triplet<double> J_entry(count, j, 1);
-                        J.push_back(J_entry);
-                        factor_types.push_back({count, FactorType::Obstacle});
-                        //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                        //Lambda.push_back(lambda_entry);
-                        count++;
-                        
-                        // Wx(j+1) = 0
-                        Eigen::Triplet<double> J_entry2(count, j + 1, 1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Obstacle});
-                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                        //Lambda.push_back(lambda_entry2);
-                        count++;
-                    }
-                }
-                else if (is_cell_free(j))
-                {
-                    // Cell j+1 is occupied. Force Wx=0 at j
-                    Eigen::Triplet<double> J_entry(count, j, 1);
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle});
-                    count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
-                }
-                else if (is_cell_free(j + 1))
-                {
-                    // Cell j is occupied. Force Wx=0 at j+1
-                    Eigen::Triplet<double> J_entry(count, j + 1, 1);
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle});
-                    count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
-                }
-                // else --> Both cells occupied -> Do nothing!
-            }
-
-            // 3.2 Regularization and Obstacle based Factors with the upper node: (j <--> j+m_size_x)
-            //----------------------------------------------------------------------------------------
-            if (jy < (m_size_y - 1))
-            {
-                if (is_cell_free(j) && is_cell_free(j + m_size_x))
-                {
-                    if (check_connectivity_between2cells(j, j + m_size_x))
-                    {
-                        // Regularization Factor: cells j and j+m_size_x should have similar wind values
-                        //  Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1);
-                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1);
-                        J.push_back(J_entry1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Regularization});
-                        count++;
-                        //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry);
-
-                        // Wy range [N+1,2N]
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
-                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1);
-                        J.push_back(J_entry3);
-                        J.push_back(J_entry4);
-                        factor_types.push_back({count, FactorType::Regularization});
-                        count++;
-                        // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
-                        // Lambda.push_back(lambda_entry2);
-                    }
-                    else
-                    {
-                        // An obstacle is in between both cells
-                        // 1. Do not create a regularization link
-                        // 2. Force Wy=0 at both cells
-                        // Force Wy=0 at j
-                        Eigen::Triplet<double> J_entry(count, j + N, 1);                        
-                        J.push_back(J_entry);
-                        factor_types.push_back({count, FactorType::Obstacle});
-                        count++;
-                        // Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                        // Lambda.push_back(lambda_entry);
-                        
-                        // Force Wy=0 at j+m_size_x
-                        Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Obstacle});
-                        count++;
-                        // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                        // Lambda.push_back(lambda_entry2);                        
-                    }
-                }
-                else if (is_cell_free(j))
-                {
-                    // Cell j+m_size_x is occupied. Force Wy=0 at j
-                    Eigen::Triplet<double> J_entry(count, j + N, 1);                    
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle});
-                    count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
-                }
-                else if (is_cell_free(j + m_size_x))
-                {
-                    // Cell j is occupied. Force Wy=0 at j+m_size_x
-                    Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
-                    J.push_back(J_entry2);
-                    factor_types.push_back({count, FactorType::Obstacle});
-                    count++;
-                    // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry2);
-                }
-                // else --> Both cells occupied -> Do nothing!
-            }
-
-
-            // 3.3 Factors for Law of Mass Conservation (avoid borders of map)
-            //----------------------------------------------------------------------------------------
+            // -----------------------------------
+            // --- 3.2 MASS CONSERVATION       ---
+            // -----------------------------------
+            // Eight Neighbor based Divergence free field constraint
             if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
             {
                 // As soon as any of its 8 clossest neighbour cells is free, set the factor
-                bool set = false;
+                bool set_divergence_free = false;
+
+                // N,S,E,W
                 if (is_cell_free(j - 1))
                 {
                     Eigen::Triplet<double> J_entry(count, j - 1, -1);
                     J.push_back(J_entry);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j + 1))
                 {
                     Eigen::Triplet<double> J_entry(count, j + 1, 1);
                     J.push_back(J_entry);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j - m_size_x))
                 {
                     Eigen::Triplet<double> J_entry(count, j + N - m_size_x, -1);
                     J.push_back(J_entry);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j + m_size_x))
                 {
                     Eigen::Triplet<double> J_entry(count, j + N + m_size_x, 1);
                     J.push_back(J_entry);
-                    set = true;
+                    set_divergence_free = true;
                 }
 
                 // Diagonals
@@ -307,7 +159,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     Eigen::Triplet<double> J_entry2(count, j + m_size_x - 1 + N, 0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j + m_size_x + 1))
                 {
@@ -315,7 +167,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     Eigen::Triplet<double> J_entry2(count, j + m_size_x + 1 + N, 0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j - m_size_x + 1))
                 {
@@ -323,7 +175,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     Eigen::Triplet<double> J_entry2(count, j - m_size_x + 1 + N, -0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
-                    set = true;
+                    set_divergence_free = true;
                 }
                 if (is_cell_free(j - m_size_x - 1))
                 {
@@ -331,18 +183,173 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     Eigen::Triplet<double> J_entry2(count, j - m_size_x - 1 + N, -0.5);
                     J.push_back(J_entry);
                     J.push_back(J_entry2);
-                    set = true;
+                    set_divergence_free = true;
                 }
 
                 // If factor is to be set...
-                if (set)
+                if (set_divergence_free)
                 {
-                    factor_types.push_back({count, FactorType::FluxConservation});
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_flux_conservation);
-                    //Lambda.push_back(lambda_entry);
+                    factor_types.push_back({count, FactorType::MassConservation, j});
                     count++;
-                    set = false;
+                    set_divergence_free = false;
                 }
+            }
+
+            // -----------------------------------
+            // --- 3.3 VORTICITY               ---
+            // -----------------------------------
+            // Implementation of: dWy/dx - dWx/dy = 0 Irrotational field constraint
+            // Controls the vorticity of the field, that is, it forces to some extent the wind to not have vortices and swirls.
+            if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+            {
+                // Vorticity requires the 4 direct neighbours to be free
+                bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
+                                            is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
+
+                if (can_compute_vorticity)
+                {
+                    // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
+                    
+                    // Wy components (indices j+N)
+                    J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
+                    J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
+                    
+                    // Wx components (indices j)
+                    J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
+                    J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
+
+                    factor_types.push_back({count, FactorType::Vorticity, j});
+                    count++;
+                }
+            }
+
+
+            // -----------------------------------
+            // --- 3.4 OBSTACLES               ---
+            // -----------------------------------
+            // --- 3.4.a  OBSTACLE Factors with the right node: (j <--> j+1)
+            //----------------------------------------------------------------
+            if (jx < (m_size_x - 1))
+            {
+                if (is_cell_free(j) && is_cell_free(size_t(j + 1)))
+                {
+                    // Cells j and j+1 are free and there is connectivity between them (no obstacle in between)
+                    if (check_connectivity_between2cells(j, size_t(j + 1)))
+                    {
+                        // Difference-Based Regularization Factor: cells j and j+1 should have similar wind values
+                        /*
+                        // Wx range [1,N]
+                        Eigen::Triplet<double> J_entry1(count, j, 1);
+                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1);
+                        J.push_back(J_entry1);
+                        J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Regularization});
+                        count++;
+
+                        // Wy range [N+1,2N]                        
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
+                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1);
+                        J.push_back(J_entry3);
+                        J.push_back(J_entry4);
+                        factor_types.push_back({count, FactorType::Regularization});
+                        count++;
+                        */
+                    }
+                    else
+                    {
+                        // An obstacle is in between cells j and j+1. Force Wx=0 at both cells
+                        // Wx(j) = 0
+                        Eigen::Triplet<double> J_entry(count, j, 1);
+                        J.push_back(J_entry);
+                        factor_types.push_back({count, FactorType::Obstacle, j});
+                        count++;
+                        
+                        // Wx(j+1) = 0
+                        Eigen::Triplet<double> J_entry2(count, j + 1, 1);
+                        J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Obstacle, j + 1});
+                        count++;
+                    }
+                }
+                else if (is_cell_free(j))
+                {
+                    // Cell j+1 is occupied. Force Wx=0 at j
+                    Eigen::Triplet<double> J_entry(count, j, 1);
+                    J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle, j});
+                    count++;
+                }
+                else if (is_cell_free(j + 1))
+                {
+                    // Cell j is occupied. Force Wx=0 at j+1
+                    Eigen::Triplet<double> J_entry(count, j + 1, 1);
+                    J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle, j + 1});
+                    count++;
+                }
+                // else --> Both cells occupied -> Do nothing!
+            }
+
+            // --- 3.4.b  OBSTACLE Factors with the upper node: (j <--> j+m_size_x)
+            //-----------------------------------------------------------------------
+            if (jy < (m_size_y - 1))
+            {
+                if (is_cell_free(j) && is_cell_free(j + m_size_x))
+                {
+                    if (check_connectivity_between2cells(j, j + m_size_x))
+                    {
+                        // Difference-Based Regularization: cells j and j+m_size_x should have similar wind values
+                        /*
+                        //  Wx range [1,N]
+                        Eigen::Triplet<double> J_entry1(count, j, 1);
+                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1);
+                        J.push_back(J_entry1);
+                        J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Regularization});
+                        count++;
+
+                        // Wy range [N+1,2N]
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
+                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1);
+                        J.push_back(J_entry3);
+                        J.push_back(J_entry4);
+                        factor_types.push_back({count, FactorType::Regularization});
+                        count++;
+                        */
+                    }
+                    else
+                    {
+                        // An obstacle is in between both cells. Force Wy=0 at both cells
+                        // Force Wy=0 at j
+                        Eigen::Triplet<double> J_entry(count, j + N, 1);                        
+                        J.push_back(J_entry);
+                        factor_types.push_back({count, FactorType::Obstacle, j});
+                        count++;
+                        
+                        // Force Wy=0 at j+m_size_x
+                        Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
+                        J.push_back(J_entry2);
+                        factor_types.push_back({count, FactorType::Obstacle, j + m_size_x});
+                        count++;
+                    }
+                }
+                else if (is_cell_free(j))
+                {
+                    // Cell j+m_size_x is occupied. Force Wy=0 at j
+                    Eigen::Triplet<double> J_entry(count, j + N, 1);                    
+                    J.push_back(J_entry);
+                    factor_types.push_back({count, FactorType::Obstacle, j});
+                    count++;
+                }
+                else if (is_cell_free(j + m_size_x))
+                {
+                    // Cell j is occupied. Force Wy=0 at j+m_size_x
+                    Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
+                    J.push_back(J_entry2);
+                    factor_types.push_back({count, FactorType::Obstacle, j + m_size_x});
+                    count++;
+                }
+                // else --> Both cells occupied -> Do nothing!
             }
         } // end for setting factors
 
@@ -362,20 +369,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             y_empty.resize(nFactors);
             y_empty.fill(0.0);
             save_grmf_factor_graph(J,Lambda,y_empty);
-            */
-
-            // DEGUB : ADD FIXED OBSERVATION
-            /*
-            TobservationGMRF new_obs;
-            const int cellIdx = xy2idx( 3.0, 3.0 );
-            new_obs.cell_idx = cellIdx;
-            new_obs.windX = 0.10;
-            new_obs.windY = 1.0;
-            new_obs.lambda = 13;
-            new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-            std::cerr <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
-            activeObs.push_back(new_obs);
-            nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
         */
     }
     catch (std::exception e)
@@ -395,20 +388,20 @@ CGMRF_map::~CGMRF_map()
 
 
 void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
-                        double m_lambdaPrior_flux_conservation, 
+                        double m_lambdaPrior_mass_conservation, 
                         double m_lambdaPrior_obstacles
                         )
 {
     // Update internal variables
     lambdaPrior_reg = m_lambdaPrior_reg;
-    lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
+    lambdaPrior_mass_conservation = m_lambdaPrior_mass_conservation;
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles)
+void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_mass_conservation, double &m_lambdaPrior_obstacles)
 {
     m_lambdaPrior_reg = lambdaPrior_reg;
-    m_lambdaPrior_flux_conservation = lambdaPrior_flux_conservation;
+    m_lambdaPrior_mass_conservation = lambdaPrior_mass_conservation;
     m_lambdaPrior_obstacles = lambdaPrior_obstacles;
 }
 
@@ -623,14 +616,77 @@ void CGMRF_map::clearObservations_GMRF()
 
 
 
-double CGMRF_map::getLambdaValue(FactorType type) const {
-    switch (type) {
+double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx) const
+{
+    switch (type) 
+    {
         case FactorType::Regularization: return lambdaPrior_reg;
-        case FactorType::FluxConservation: return lambdaPrior_flux_conservation;
+        case FactorType::MassConservation: return lambdaPrior_mass_conservation;
         case FactorType::Obstacle: return lambdaPrior_obstacles;
+        case FactorType::Vorticity: 
+            {
+                int cell_steps = m_cells_to_obs[cell_idx];  //Number of cells to the nearest obstacle
+                int d_laminar = 4; // Min Number of cells to nearest obstacle to consider as "laminar flow" (high lambda)
+
+                // Dinamic Lmabda weight
+                // Open Areas (large distance to obstacles) --> High lambda to avoid vortices and swirls
+                // Narrow Passages (small distance to obstacles) --> Low lambda to allow vortices
+                double lambda_vort = lambdaPrior_vorticity / (1.0 + std::exp(-5*(cell_steps - d_laminar))); // Sigmoid function to smoothly transition between low and high lambda values based on the distance to the nearest obstacle
+                return lambda_vort;
+            }
         default: return 0.0;
     }
 }
+
+
+void CGMRF_map::computeDistanceTransform() 
+{
+    // This function computes the distance from each cell to the nearest obstacle using a breadth-first search (BFS) approach.
+
+    m_cells_to_obs.assign(N, std::numeric_limits<int>::max()); 
+    std::queue<size_t> q;
+
+    // 1. Seed Obstacles (distance = 0)
+    for (size_t j = 0; j < N; j++) 
+    {
+        if (!is_cell_free(j)) 
+        {
+            m_cells_to_obs[j] = 0;
+            q.push(j);
+        }
+    }
+
+    // 2. 8-connectivity for Chebyshev steps
+    int dx[] = {1, -1, 0, 0, 1, 1, -1, -1};
+    int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
+
+    while (!q.empty()) 
+    {
+        size_t curr_idx = q.front();
+        q.pop();
+
+        size_t cx, cy;
+        id2cellxy(curr_idx, cx, cy);
+
+        for (int i = 0; i < 8; i++) 
+        {
+            int nx = (int)cx + dx[i];
+            int ny = (int)cy + dy[i];
+
+            // Check bounds
+            if (nx >= 0 && nx < (int)m_size_x && ny >= 0 && ny < (int)m_size_y) 
+            {
+                size_t next_idx = xy2idx(nx, ny);
+                if (m_cells_to_obs[next_idx] == std::numeric_limits<int>::max()) 
+                {
+                    m_cells_to_obs[next_idx] = m_cells_to_obs[curr_idx] + 1;
+                    q.push(next_idx);
+                }
+            }
+        }
+    }
+}
+
 
 /*---------------------------------------------------------------
                 MAXIMUM A POSTERIORI Estimation GMRF
@@ -678,10 +734,11 @@ void CGMRF_map::MAP_estimation_GMRF()
         y_temp.fill(0.0);
         
         // LAMBDA PRIOR FACTORS
-        for (std::vector<std::pair<size_t, FactorType>>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
+        for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
         {
-            double lambda_value = getLambdaValue(it->second);
-            Eigen::Triplet<double> lambda_entry(it->first, it->first, lambda_value);
+            // Get lambda value for the factor type            
+            double lambda_value = getLambdaValue(it->type, it->cell_idx);
+            Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
             Lambda_temp.push_back(lambda_entry);
         }
 
