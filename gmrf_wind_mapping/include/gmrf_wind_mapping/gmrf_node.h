@@ -7,12 +7,8 @@
 *         http://mapir.isa.uma.es
 *********************************************************************/
 
-#include "rclcpp/rclcpp.hpp"
-#include "std_msgs/msg/float32.hpp"
-#include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/math/constants/constants.hpp>

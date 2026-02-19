@@ -22,6 +22,7 @@
 #include <chrono>
 #include <tf2/time.h>
 #include <yaml-cpp/yaml.h>
+#include <cmath>     // Required for mathematical operations
 
 using namespace std::placeholders;
 

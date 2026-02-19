@@ -7,6 +7,7 @@
     locations.
     ================================================================
 */
+#pragma once
 #include <eigen3/Eigen/Sparse>
 #include <fstream> // std::ofstream
 #include <math.h>  /* atan2 */
