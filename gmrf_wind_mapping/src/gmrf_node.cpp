@@ -22,6 +22,8 @@
 #include <chrono>
 #include <tf2/time.h>
 #include <yaml-cpp/yaml.h>
+#include <numeric>   // Required for std::inner_product
+#include <cmath>     // Required for mathematical operations
 
 using namespace std::placeholders;
 
@@ -44,9 +46,10 @@ Cgmrf::Cgmrf()
     visualize_gmrf = declare_parameter<bool>("visualize_gmrf", true);
 
     // Lambda/weights for the different priors
-    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
-    GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
-    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
+    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 100.0);
+    GMRF_lambdaPrior_vorticity = declare_parameter<double>("GMRF_lambdaPrior_vorticity", 100.0);
+    GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10.0);
+    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 0.1);
 
     // Observation variances (Gaussian likelihood)
     observation_var_wind_speed = declare_parameter<double>("observation_var_wind_speed", 0.0001);           // Variance of the wind speed measurement (m/s)^2
@@ -179,15 +182,14 @@ void Cgmrf::initialize()
     
     // Create the GMRF-Map and initialize its Prior Factors
     my_map = std::make_unique<CGMRF_map>(occMap, 
-                                        cell_size, 
-                                        GMRF_lambdaPrior_reg, 
-                                        GMRF_lambdaPrior_flux_conservation,
-                                        GMRF_lambdaPrior_obstacles,
+                                        cell_size,
                                         verbose,
                                         true // estimateTiming
                                         );
+    my_map->update_lambdas(GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles, GMRF_lambdaPrior_reg);
     RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
+
 
     // DEBUG - ADD SOME RANDOM OBSERVATIONS
     //      insertObservation_GMRF(double wind_speed, double wind_direction, double x_pos, double y_pos, double lambdaObs)
@@ -271,8 +273,8 @@ void Cgmrf::sensorCallback(const olfaction_msgs::msg::Anemometer::SharedPtr msg)
 
         mutex_anemometer.lock();
         // TODO: Read from parameter or add to the message the variance of the measurement
-        double var_wind_speed = 0.001; // (m/s)^2
-        double var_wind_direction = 0.0001; // (rad)^2
+        double var_wind_speed = observation_var_wind_speed; // (m/s)^2
+        double var_wind_direction = observation_var_wind_direction; // (rad)^2
         my_map->insertObservation_GMRF(reading_speed, downwind_direction_map, var_wind_speed, var_wind_direction, x_pos, y_pos);
         mutex_anemometer.unlock();
     }
@@ -295,10 +297,11 @@ void Cgmrf::publishMaps()
 void Cgmrf::update()
 {
     // Update Lambda parameters (from parameter server)
-    GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
-    GMRF_lambdaPrior_flux_conservation = get_parameter("GMRF_lambdaPrior_flux_conservation").as_double();
+    GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_vorticity = get_parameter("GMRF_lambdaPrior_vorticity").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
-    my_map->update_lambdas(GMRF_lambdaPrior_reg, GMRF_lambdaPrior_flux_conservation, GMRF_lambdaPrior_obstacles);
+    GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
+    my_map->update_lambdas(GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles, GMRF_lambdaPrior_reg);
 
     // Update GMRF estimation
      my_map->MAP_estimation_GMRF();
