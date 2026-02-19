@@ -10,7 +10,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${CMAKE_CXX_FLAGS}")
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED) 
 find_package(angles REQUIRED) 
-find_package(Eigen3 REQUIRED) 
 find_package(tf2_geometry_msgs REQUIRED) 
 find_package(tf2_ros REQUIRED) 
 find_package(std_msgs REQUIRED) 
@@ -24,16 +23,14 @@ find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Ceres REQUIRED)
 
-
-FILE(GLOB_RECURSE MYFILES_CPP "src/*.cpp")
-
 # INCLUDES
 include_directories(
   include
-  ${EIGEN3_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${CERES_INCLUDE_DIRS}
 )
+
+add_subdirectory(gmrf_wind_core)
 
 # Install launch files and related config files.
 install(DIRECTORY
@@ -42,14 +39,14 @@ install(DIRECTORY
 )
 
 # GMRF-NODE
-add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp src/gmrf_map.cpp)
+add_executable(gmrf_wind_mapping_node src/gmrf_node.cpp)
 target_include_directories(gmrf_wind_mapping_node PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(gmrf_wind_mapping_node ${OpenCV_LIBS} yaml-cpp)
+target_link_libraries(gmrf_wind_mapping_node gmrf_wind_core ${OpenCV_LIBS} yaml-cpp)
 
 # GMRF-VALIDATION
-add_executable(gmrf_validation src/gmrf_validation.cpp src/gmrf_map.cpp)
+add_executable(gmrf_validation src/gmrf_validation.cpp)
 target_include_directories(gmrf_validation PUBLIC ${OpenCV_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS})
-target_link_libraries(gmrf_validation ${OpenCV_LIBS} ${CERES_LIBRARIES} yaml-cpp)
+target_link_libraries(gmrf_validation gmrf_wind_core ${OpenCV_LIBS} ${CERES_LIBRARIES} yaml-cpp)
 
 # DEPENDENCIES
 ament_target_dependencies(gmrf_wind_mapping_node

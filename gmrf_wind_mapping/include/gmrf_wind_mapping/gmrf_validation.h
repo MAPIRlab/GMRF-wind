@@ -23,7 +23,7 @@
 
 
 // Core GMRF map
-#include "gmrf_wind_mapping/gmrf_map.h"
+#include "gmrf_wind_core/gmrf_map.h"
 
 
 struct WindVectorXY

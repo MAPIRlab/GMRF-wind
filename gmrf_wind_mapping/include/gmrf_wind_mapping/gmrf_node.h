@@ -22,7 +22,7 @@
 #include "olfaction_msgs/msg/anemometer.hpp"
 
 // Core GMRF map
-#include "gmrf_wind_mapping/gmrf_map.h"
+#include "gmrf_wind_core/gmrf_map.h"
 
 // Services
 #include "gmrf_msgs/srv/wind_estimation.hpp"

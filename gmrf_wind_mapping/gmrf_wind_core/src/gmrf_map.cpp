@@ -1,4 +1,4 @@
-#include "gmrf_wind_mapping/gmrf_map.h"
+#include "gmrf_wind_core/gmrf_map.h"
 #include <cstdio>   // Necesario para fprintf
 #include <iostream>
 #include <iomanip>  // Necesario para std::setprecision
