@@ -12,7 +12,7 @@ import os
 from pyrsistent import ny
 
 # Configuration
-csv_file ="NLPD_optimization_results_central_obstacle_05ms/gmrf_opt_estimation_obs_50.csv"
+csv_file ="gmrf_estimation_lambda_100.000000_0.001000_0.001000_10.000000.csv"
 
 base_name = os.path.splitext(csv_file)[0]
 out_file = base_name + '.png'
