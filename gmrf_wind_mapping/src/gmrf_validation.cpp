@@ -41,13 +41,13 @@ Cvalgt::Cvalgt()
     observation_var_wind_direction = declare_parameter<double>("observation_var_wind_direction", 0.0001);       // Variance of the wind direction measurement (rad)^2
 
     // Lambda/weights for the different priors
-    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 1.0);
-    GMRF_lambdaPrior_flux_conservation = declare_parameter<double>("GMRF_lambdaPrior_flux_conservation", 1.0);
+    GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 1.0);
+    GMRF_lambdaPrior_vorticity = declare_parameter<double>("GMRF_lambdaPrior_vorticity", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
+    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_regularization", 0.1);
 
     // Experiment
-     experiment_number = declare_parameter<int>("experiment_number", 0);
-    
+    experiment_number = declare_parameter<int>("experiment_number", 0);
 
     // Publishers
     //----------------------------------
@@ -148,21 +148,19 @@ void Cvalgt::initialize()
     // Parse OccupancyGridmap to internal GMRF format
     TOccupancyMap occMap;
     occMap.data = occupancy_map.data;
-    occMap.resolution = occupancy_map.info.resolution;      // cell size (m)
-    occMap.width = occupancy_map.info.width;        // number of cells in X direction
-    occMap.height = occupancy_map.info.height;       // number of cells in Y direction
-    occMap.origin_x = occupancy_map.info.origin.position.x;        // world coordinates of the origin of the map
-    occMap.origin_y = occupancy_map.info.origin.position.y;        // world coordinates of the origin of the map
+    occMap.resolution = occupancy_map.info.resolution;              // cell size (m)
+    occMap.width = occupancy_map.info.width;                        // number of cells in X direction
+    occMap.height = occupancy_map.info.height;                      // number of cells in Y direction
+    occMap.origin_x = occupancy_map.info.origin.position.x;         // world coordinates of the origin of the map
+    occMap.origin_y = occupancy_map.info.origin.position.y;         // world coordinates of the origin of the map
     
-    // Create the GMRF-Map and initialize its Prior Factors
-    gmrf_map = std::make_unique<CGMRF_map>(occMap, 
-                                        cell_size, 
-                                        GMRF_lambdaPrior_reg, 
-                                        GMRF_lambdaPrior_flux_conservation,
-                                        GMRF_lambdaPrior_obstacles,
+    // Create the GMRF-Map and initialize its Prior Factors with the parameters from the ROS2 params server
+    gmrf_map = std::make_unique<CGMRF_map>(occMap,
+                                        cell_size,
                                         verbose,
                                         true // estimateTiming
                                         );
+    gmrf_map->update_lambdas(GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles, GMRF_lambdaPrior_reg);
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
     module_init = true;
 }
@@ -391,7 +389,7 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
         x_pos_meters = gmrf_map->map_dimensions_meters()[0] + (idx % dimensions.x() + 0.5) * cell_size;
         y_pos_meters = gmrf_map->map_dimensions_meters()[2] + (idx / dimensions.x() + 0.5) * cell_size;
 
-        // Insert observation
+        // Insert observation in GRMF
         gmrf_map->insertObservation_GMRF(module + noise_speed(gen), direction + noise_direction(gen), observation_var_wind_speed, observation_var_wind_direction, x_pos_meters, y_pos_meters);
         if (verbose)
             RCLCPP_INFO(get_logger(), "[Cvalgt] Inserting observation %zu: speed=%.2f m/s, direction=%.2f rad, pos=(%.2f, %.2f) m", 
@@ -757,16 +755,16 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
 }
 
 
-void Cvalgt::update_lambdas(double lambda_reg, double lambda_flux, double lambda_obstacles)
+void Cvalgt::update_lambdas(double lambda_mass, double lambda_vorticity, double lambda_obstacles, double lambda_reg)
 {
-    gmrf_map->update_lambdas(lambda_reg, lambda_flux, lambda_obstacles);
+    gmrf_map->update_lambdas(lambda_mass, lambda_vorticity, lambda_obstacles, lambda_reg);
 }
 
-void Cvalgt::read_lambdas(double &lambda_reg, double &lambda_flux, double &lambda_obstacles)    
-{
-    gmrf_map->read_lambdas(lambda_reg, lambda_flux, lambda_obstacles);
-}
 
+void Cvalgt::read_lambdas(double &lambda_mass, double &lambda_vort, double &lambda_obst, double &lambda_reg)
+{
+    gmrf_map->read_lambdas(lambda_mass, lambda_vort, lambda_obst, lambda_reg);
+}
 
 
 struct Stats {
@@ -774,6 +772,8 @@ struct Stats {
     double variance;
     double std_dev;
 };
+
+
 Stats calculate_stats(const std::vector<double>& data) 
 {
     if (data.empty()) return {0.0, 0.0, 0.0};
@@ -816,18 +816,18 @@ int main(int argc, char** argv)
     {
     case 1: //Optimize Lambda parameters with NLPD (scenario, wind, Nobs)
     {
-        // Initial values for the 3 Lambda parameters (Reg, Flux, Obstacles)
-        double parameters[3] = {0.1, 0.1, 0.1};
-        double ref_parameters[3] = {1, 10, 10};    // We use these values as baseline
-        for (int j = 0; j < 3; ++j)
+        // Initial values for the Lambda precission parameters (MassConservation, Vorticity and Obstacles)
+        double parameters[4] = {0.1, 0.1, 0.1, 0.1};
+        double ref_parameters[4] = {100, 100, 10, 1};    // We use these values as baseline
+        for (int j = 0; j < 4; ++j)
             parameters[j] = static_cast<double>(rand()) / RAND_MAX * 10; // Random value between 0 and 10
-        my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+        my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
         // CERES OPTIMIZER
         ceres::Problem problem;
 
         // <CostFunctor, Number of Residuals, Number of Parameters>
         ceres::CostFunction* cost_function =
-            new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 3>(
+            new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4>(
                 new CostFunctor(my_gmrf_map.get())
             );
 
@@ -840,17 +840,18 @@ int main(int argc, char** argv)
         options.use_nonmonotonic_steps = true; // Using a non-monotonic steps can help "jump" over small ridges
         options.minimizer_progress_to_stdout = false;
         // Ensure lambdas are positive
-        problem.SetParameterLowerBound(parameters, 0, 1e-6); // Lambda_Reg >= 0
-        problem.SetParameterLowerBound(parameters, 1, 1e-6); // Lambda_Flux >= 0
+        problem.SetParameterLowerBound(parameters, 0, 1e-6); // Lambda_Mass >= 0
+        problem.SetParameterLowerBound(parameters, 1, 1e-6); // Lambda_Vorticity >= 0
         problem.SetParameterLowerBound(parameters, 2, 1e-6); // Lambda_Obstacles >= 0
+        problem.SetParameterLowerBound(parameters, 3, 1e-6); // Lambda_Reg >= 0
 
         // DATA COLLECTION
         std::string filename_results = "gmrf_opt_metrics_lambda_Nobs.csv";
         std::ofstream file_results(filename_results);
-        if (file_results.is_open()) 
+        if (file_results.is_open())
         {
             // Header
-            file_results << "N_Obs,AAE,RMSE,ANSP,NLPD,Lambda_Reg_mean,Lambda_Reg_std,Lambda_Flux_mean,Lambda_Flux_std,Lambda_Obstacles_mean,Lambda_Obstacles_std,GMRF_estimation_filename\n";
+            file_results << "N_Obs,AAE,RMSE,ANSP,NLPD,Lambda_Mass_mean,Lambda_Mass_std,Lambda_Vorticity_mean,Lambda_Vorticity_std,Lambda_Obstacles_mean,Lambda_Obstacles_std,Lambda_Reg_mean,Lambda_Reg_std,LGMRF_estimation_filename\n";
             file_results.close();
         } else {
             std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
@@ -870,6 +871,7 @@ int main(int argc, char** argv)
             std::vector<double> lambda1;
             std::vector<double> lambda2;
             std::vector<double> lambda3;
+            std::vector<double> lambda4;
 
             // Save to CSV file
             std::string filename_lambda = "Lambda_values_obs_" + std::to_string(i) + ".csv";
@@ -877,7 +879,7 @@ int main(int argc, char** argv)
             if (file_lambda.is_open()) 
             {
                 // Header
-                file_lambda << "Repetition,AAE,RMSE,ANSP,NLPD,Lambda_Reg,Lambda_Flux,Lambda_Obstacles\n";
+                file_lambda << "Repetition,AAE,RMSE,ANSP,NLPD,Lambda_Mass,Lambda_Vorticity,Lambda_Obstacles,Lambda_Reg\n";
                 file_lambda.close();
             } else {
                 std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
@@ -886,9 +888,9 @@ int main(int argc, char** argv)
             for (int repeat = 0; repeat < 20; ++repeat)
             {
                 // Reset parameters on each iteration to avoid local minima (slower)
-                for (int j = 0; j < 3; ++j)
+                for (int j = 0; j < 4; ++j)
                     parameters[j] = static_cast<double>(rand()) / RAND_MAX * 10; // Random value between 0 and 10
-                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
 
                 // Simulate N (random) observations (also clears previous observations)
                 my_gmrf_map->SimulateWindObservations(i);
@@ -901,9 +903,10 @@ int main(int argc, char** argv)
                 lambda1.push_back(parameters[0]);
                 lambda2.push_back(parameters[1]);
                 lambda3.push_back(parameters[2]);
+                lambda4.push_back(parameters[3]);
 
                 // Update GMRF with optimal lambda values
-                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
 
                 // Perform final estimation with optimized lambdas
                 my_gmrf_map->update();
@@ -916,7 +919,7 @@ int main(int argc, char** argv)
                 double NLPD_opt = metrics[3]; // NLPD is the fourth element
                 
                 // Compute estimation with baseline parameters for comparison
-                my_gmrf_map->update_lambdas(ref_parameters[0], ref_parameters[1], ref_parameters[2]);
+                my_gmrf_map->update_lambdas(ref_parameters[0], ref_parameters[1], ref_parameters[2], ref_parameters[3]);
                 my_gmrf_map->update();
                 std::array<double, 4> metrics_ref = my_gmrf_map->compute_performance_metrics();
                 double AAE_ref = metrics_ref[0];  // AAE is the first element
@@ -935,7 +938,8 @@ int main(int argc, char** argv)
                                 << NLPD_opt << "," 
                                 << parameters[0] << "," 
                                 << parameters[1] << ","
-                                << parameters[2] << "\n";
+                                << parameters[2] << ","
+                                << parameters[3] << "\n";
                     // Baseline
                     file_append << repeat << "," 
                                 << AAE_ref << "," 
@@ -944,7 +948,8 @@ int main(int argc, char** argv)
                                 << NLPD_ref << "," 
                                 << ref_parameters[0] << "," 
                                 << ref_parameters[1] << ","
-                                << ref_parameters[2] << "\n";
+                                << ref_parameters[2] << ","
+                                << ref_parameters[3] << "\n";
                     file_append.close();
                 } else {
                     std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
@@ -955,12 +960,14 @@ int main(int argc, char** argv)
             Stats stats1 = calculate_stats(lambda1);
             Stats stats2 = calculate_stats(lambda2);
             Stats stats3 = calculate_stats(lambda3);
+            Stats stats4 = calculate_stats(lambda4);
                     
             // Update GMRF with mean lambda values
             parameters[0] = stats1.mean;
             parameters[1] = stats2.mean;
-            parameters[2] = stats3.mean;            
-            my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+            parameters[2] = stats3.mean;
+            parameters[3] = stats4.mean;
+            my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
 
             // Perform final estimation with optimized lambdas
             my_gmrf_map->update();
@@ -986,6 +993,7 @@ int main(int argc, char** argv)
                             << stats1.mean << "," << stats1.std_dev << ","
                             << stats2.mean << "," << stats2.std_dev << ","
                             << stats3.mean << "," << stats3.std_dev << ","
+                            << stats4.mean << "," << stats4.std_dev << ","
                             << file_name << "\n";
                 file_append.close();
 
@@ -1003,16 +1011,17 @@ int main(int argc, char** argv)
         // Simple GMRF estimation with fixed Lambdas
         // =========================================
 
-        // Initial values for the 3 Lambda parameters (Reg, Flux, Obstacles)
-        double parameters[3] = {my_gmrf_map->GMRF_lambdaPrior_reg, 
-                                my_gmrf_map->GMRF_lambdaPrior_flux_conservation, 
-                                my_gmrf_map->GMRF_lambdaPrior_obstacles};
+        // Initial values for the Lambda precision parameters (from ROS2 params)
+        double parameters[4] = {my_gmrf_map->GMRF_lambdaPrior_mass_conservation,
+                                my_gmrf_map->GMRF_lambdaPrior_vorticity,
+                                my_gmrf_map->GMRF_lambdaPrior_obstacles,
+                                my_gmrf_map->GMRF_lambdaPrior_reg};
 
         // Simulate 50 noisy random observations (wont change during the test)
         my_gmrf_map->SimulateWindObservations(50);
 
         // Update GMRF with new lambda values
-        my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+        my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
         
         // Perform MAP + Uncertainty estimation
         my_gmrf_map->update();
@@ -1021,16 +1030,17 @@ int main(int argc, char** argv)
         std::string file_name = "gmrf_estimation_lambda_" + 
                                 std::to_string(parameters[0]) + "_" + 
                                 std::to_string(parameters[1]) + "_" + 
-                                std::to_string(parameters[2]) + ".csv";
+                                std::to_string(parameters[2]) + "_" + 
+                                std::to_string(parameters[3]) + ".csv";
         my_gmrf_map->saveGMRFEstimationToCSV(file_name);
 
         break;
 
-        // Iterate over each of the 3 parameter positions
+        // Iterate over each of the parameter positions
         // Define the set of values you want to test
         std::vector<double> test_values = {0.01, 0.1, 1.0, 10.0, 100.0, 1000.0};
 
-        for (int i = 0; i < 3; ++i) 
+        for (int i = 0; i < 4; ++i) 
         {
             double original_val = parameters[i]; // Store original to reset later
 
@@ -1040,7 +1050,7 @@ int main(int argc, char** argv)
                 parameters[i] = val;
 
                 // Update GMRF with new lambda values
-                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2]);
+                my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
                 
                 // Perform MAP + Uncertainty estimation
                 my_gmrf_map->update();
@@ -1049,7 +1059,8 @@ int main(int argc, char** argv)
                 std::string file_name = "gmrf_estimation_lambda_" + 
                                         std::to_string(parameters[0]) + "_" + 
                                         std::to_string(parameters[1]) + "_" + 
-                                        std::to_string(parameters[2]) + ".csv";
+                                        std::to_string(parameters[2]) + "_" + 
+                                        std::to_string(parameters[3]) + ".csv";
                 my_gmrf_map->saveGMRFEstimationToCSV(file_name);
             }
 
