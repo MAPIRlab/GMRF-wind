@@ -9,12 +9,9 @@
                         Constructor
   ---------------------------------------------------------------*/
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
-                     float cell_size, 
-                     double m_lambdaPrior_reg,
-                     double m_lambdaPrior_mass_conservation, 
-                     double m_lambdaPrior_obstacles,
-                     bool verbose,
-                     bool estimateTiming=false)
+                    float cell_size,
+                    bool verbose,
+                    bool estimateTiming=false)
 {
     // Set Verbose level
     this->verbose = verbose;
@@ -25,10 +22,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         // Copy params to internal variables
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
         m_resolution = cell_size; // Desired resolution to build the GMRF (m)
-        lambdaPrior_reg = m_lambdaPrior_reg;
-        lambdaPrior_mass_conservation = m_lambdaPrior_mass_conservation;
-        lambdaPrior_obstacles = m_lambdaPrior_obstacles;
-        // Compute SQRT values
         
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
         double x_min = oc_map.origin_x;
@@ -104,17 +97,26 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             // -----------------------------------
             // --- 3.1 REGULARIZATION (Wx=Wy=0) --
             // -----------------------------------
-            // This applies to all cells (ocupied or not), since we want to force the estimation to be 0 at cells with no information
+            int reg_order = 1;
+            if (!is_cell_free(j) || reg_order == 0)
             {
-                // Regularization for Wx: 1.0 * Wx(j) = 0
-                J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                factor_types.push_back({count, FactorType::Regularization, j});
-                count++;
+                // Force estimation to be 0 at cells with no other information (Damping)
+                {
+                    // Regularization for Wx: 1.0 * Wx(j) = 0
+                    J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                    factor_types.push_back({count, FactorType::Regularization, j});
+                    count++;
 
-                // Regularization for Wy: 1.0 * Wy(j) = 0
-                J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                factor_types.push_back({count, FactorType::Regularization, j});
-                count++;
+                    // Regularization for Wy: 1.0 * Wy(j) = 0
+                    J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                    factor_types.push_back({count, FactorType::Regularization, j});
+                    count++;
+                }
+            }
+            else if (reg_order == 1)
+            {
+                // Tikhonov first order regularization (smoothness prior): Wx(j) - Wx(right) = 0 and Wy(j) - Wy(top) = 0
+                // See OBSTACLES PRIOR for a more detailed regularization that takes into account the presence of obstacles in the map.
             }
 
             // -----------------------------------
@@ -200,34 +202,82 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             // -----------------------------------
             // Implementation of: dWy/dx - dWx/dy = 0 Irrotational field constraint
             // Controls the vorticity of the field, that is, it forces to some extent the wind to not have vortices and swirls.
-            if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+            int num_neighbors = 8;
+            if (num_neighbors == 4)
             {
-                // Vorticity requires the 4 direct neighbours to be free
-                bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
-                                            is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
-
-                if (can_compute_vorticity)
+                // 4 neighbors stencil (Von Neumann neighborhood) to compute the derivatives with finite differences. 
+                // We set the factor only if the 4 neighbors are free
+                if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
                 {
-                    // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
-                    
-                    // Wy components (indices j+N)
-                    J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
-                    J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
-                    
-                    // Wx components (indices j)
-                    J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
-                    J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
+                    // Vorticity requires the 4 direct neighbours to be free
+                    bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
+                                                is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
 
-                    factor_types.push_back({count, FactorType::Vorticity, j});
-                    count++;
+                    if (can_compute_vorticity)
+                    {
+                        // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
+                        
+                        // Wy components (indices j+N)
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
+                        
+                        // Wx components (indices j)
+                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
+                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
+
+                        factor_types.push_back({count, FactorType::Vorticity, j});
+                        count++;
+                    }
+                }
+            }
+            else if (num_neighbors == 8)
+            {
+                // 8 neighbors stencil (Moore neighborhood) to compute the derivatives with finite differences. 
+                if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+                {
+                    // Ensure all 8 neighbors are free to compute a symmetric 8-point curl
+                    bool can_compute_vorticity = 
+                        is_cell_free(j - 1) && is_cell_free(j + 1) &&           // W, E
+                        is_cell_free(j - m_size_x) && is_cell_free(j + m_size_x) && // S, N
+                        is_cell_free(j - m_size_x - 1) && is_cell_free(j - m_size_x + 1) && // SW, SE
+                        is_cell_free(j + m_size_x - 1) && is_cell_free(j + m_size_x + 1);    // NW, NE
+
+                    if (can_compute_vorticity)
+                    {
+                        // We use a weighted stencil for d/dx and d/dy (Sobel-style) 
+                        // to ensure the diagonal neighbors properly constrain the field.
+                        
+                        // --- dWy / dx term ---
+                        // Right neighbors (+)
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) + 1,              1.0));   // E
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x + 1,  0.5));   // NE
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x + 1,  0.5));   // SE
+                        // Left neighbors (-)
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) - 1,             -1.0));  // W
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x - 1, -0.5));  // NW
+                        J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x - 1, -0.5));  // SW
+
+                        // --- dWx / dy term ---
+                        // Top neighbors (-)  [Remember: dWx/dy is subtracted in curl]
+                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x,            -1.0));  // N
+                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x + 1,        -0.5));  // NE
+                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x - 1,        -0.5));  // NW
+                        // Bottom neighbors (+)
+                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x,             1.0));  // S
+                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x + 1,         0.5));  // SE
+                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x - 1,         0.5));  // SW
+
+                        factor_types.push_back({count, FactorType::Vorticity, j});
+                        count++;
+                    }
                 }
             }
 
 
-            // -----------------------------------
-            // --- 3.4 OBSTACLES               ---
-            // -----------------------------------
-            // --- 3.4.a  OBSTACLE Factors with the right node: (j <--> j+1)
+            // -------------------------------------
+            // --- 3.4 OBSTACLES + REG_1st_order ---
+            // -------------------------------------
+            // --- 3.4.a  Factors with the right node: (j <--> j+1)
             //----------------------------------------------------------------
             if (jx < (m_size_x - 1))
             {
@@ -236,36 +286,34 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     // Cells j and j+1 are free and there is connectivity between them (no obstacle in between)
                     if (check_connectivity_between2cells(j, size_t(j + 1)))
                     {
-                        // Difference-Based Regularization Factor: cells j and j+1 should have similar wind values
-                        /*
+                        // Order 1 Regularization Factor (Tikhonov): cells j and j+1 should have similar wind values
                         // Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1);
-                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1);
+                        Eigen::Triplet<double> J_entry1(count, j, 1.0);
+                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1.0);
                         J.push_back(J_entry1);
                         J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Regularization});
+                        factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
 
                         // Wy range [N+1,2N]                        
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
-                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1);
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1.0);
+                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1.0);
                         J.push_back(J_entry3);
                         J.push_back(J_entry4);
-                        factor_types.push_back({count, FactorType::Regularization});
+                        factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
-                        */
                     }
                     else
                     {
                         // An obstacle is in between cells j and j+1. Force Wx=0 at both cells
                         // Wx(j) = 0
-                        Eigen::Triplet<double> J_entry(count, j, 1);
+                        Eigen::Triplet<double> J_entry(count, j, 1.0);
                         J.push_back(J_entry);
                         factor_types.push_back({count, FactorType::Obstacle, j});
                         count++;
                         
                         // Wx(j+1) = 0
-                        Eigen::Triplet<double> J_entry2(count, j + 1, 1);
+                        Eigen::Triplet<double> J_entry2(count, j + 1, 1.0);
                         J.push_back(J_entry2);
                         factor_types.push_back({count, FactorType::Obstacle, j + 1});
                         count++;
@@ -290,7 +338,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 // else --> Both cells occupied -> Do nothing!
             }
 
-            // --- 3.4.b  OBSTACLE Factors with the upper node: (j <--> j+m_size_x)
+            // --- 3.4.b  Factors with the upper node: (j <--> j+m_size_x)
             //-----------------------------------------------------------------------
             if (jy < (m_size_y - 1))
             {
@@ -298,24 +346,22 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 {
                     if (check_connectivity_between2cells(j, j + m_size_x))
                     {
-                        // Difference-Based Regularization: cells j and j+m_size_x should have similar wind values
-                        /*
-                        //  Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1);
-                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1);
+                        // Order 1 Regularization Factor (Tikhonov): cells j and j+m_size_x should have similar wind values
+                        // Wx range [1,N]
+                        Eigen::Triplet<double> J_entry1(count, j, 1.0);
+                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1.0);
                         J.push_back(J_entry1);
                         J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Regularization});
+                        factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
 
                         // Wy range [N+1,2N]
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1);
-                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1);
+                        Eigen::Triplet<double> J_entry3(count, j + N, 1.0);
+                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1.0);
                         J.push_back(J_entry3);
                         J.push_back(J_entry4);
-                        factor_types.push_back({count, FactorType::Regularization});
+                        factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
-                        */
                     }
                     else
                     {
@@ -361,7 +407,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         activeObs.clear();
         std::cerr <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
 
-        
+        // Compute Distance to the closest obstacle for each cell (for later use in the Lambda factors)
+        computeDistanceTransform();
+
         // DEBUG: Save to file
         //-------------------
         /*
@@ -387,22 +435,27 @@ CGMRF_map::~CGMRF_map()
 }
 
 
-void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
-                        double m_lambdaPrior_mass_conservation, 
-                        double m_lambdaPrior_obstacles
-                        )
+void CGMRF_map::update_lambdas(double m_lambdaPrior_mass,
+                        double m_lambdaPrior_vorticity, 
+                        double m_lambdaPrior_obstacles,
+                        double m_lambdaPrior_reg)
 {
-    // Update internal variables
-    lambdaPrior_reg = m_lambdaPrior_reg;
-    lambdaPrior_mass_conservation = m_lambdaPrior_mass_conservation;
+    // Update internal precision parameters
+    lambdaPrior_mass_conservation = m_lambdaPrior_mass;
+    lambdaPrior_vorticity = m_lambdaPrior_vorticity;
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
+    lambdaPrior_reg = m_lambdaPrior_reg;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_mass_conservation, double &m_lambdaPrior_obstacles)
+void CGMRF_map::read_lambdas(double &m_lambdaPrior_mass, 
+                        double &m_lambdaPrior_vorticity, 
+                        double &m_lambdaPrior_obstacles, 
+                        double &m_lambdaPrior_reg)
 {
-    m_lambdaPrior_reg = lambdaPrior_reg;
-    m_lambdaPrior_mass_conservation = lambdaPrior_mass_conservation;
+    m_lambdaPrior_mass = lambdaPrior_mass_conservation;
+    m_lambdaPrior_vorticity = lambdaPrior_vorticity;
     m_lambdaPrior_obstacles = lambdaPrior_obstacles;
+    m_lambdaPrior_reg = lambdaPrior_reg;
 }
 
 /*---------------------------------------------------------------
@@ -632,6 +685,7 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx) const
                 // Open Areas (large distance to obstacles) --> High lambda to avoid vortices and swirls
                 // Narrow Passages (small distance to obstacles) --> Low lambda to allow vortices
                 double lambda_vort = lambdaPrior_vorticity / (1.0 + std::exp(-5*(cell_steps - d_laminar))); // Sigmoid function to smoothly transition between low and high lambda values based on the distance to the nearest obstacle
+                return lambdaPrior_vorticity;
                 return lambda_vort;
             }
         default: return 0.0;

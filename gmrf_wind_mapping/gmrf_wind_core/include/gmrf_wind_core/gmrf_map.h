@@ -86,8 +86,8 @@ struct TimeStats {
 enum class FactorType {
     MassConservation,
     Vorticity,
-    Observation,    
     Obstacle,
+    Observation,
     Regularization
 };
 
@@ -102,21 +102,17 @@ class CGMRF_map
 public:
     // Create GMRF from an occupancy gridmap
     // And sets the prior weights for the different factors
-    CGMRF_map(  const TOccupancyMap& oc_map, 
-                float cell_size,
-                double m_lambdaPrior_reg,
-                double m_lambdaPrior_mass_conservation, 
-                double m_lambdaPrior_obstacles,
-                bool verbose,
-                bool estimateTiming
-            );
+    CGMRF_map(const TOccupancyMap& oc_map, 
+                    float cell_size,
+                    bool verbose,
+                    bool estimateTiming);
     ~CGMRF_map();
 
     // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
     void clearObservations_GMRF();
-    void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_mass_conservation, double m_lambdaPrior_obstacles);
-    void read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_mass_conservation, double &m_lambdaPrior_obstacles);
+    void update_lambdas(double m_lambdaPrior_mass, double m_lambdaPrior_vorticity, double m_lambdaPrior_obstacles, double m_lambdaPrior_reg);
+    void read_lambdas(double &m_lambdaPrior_mass, double &m_lambdaPrior_vorticity, double &m_lambdaPrior_obstacles, double &m_lambdaPrior_reg);
    
     // GMRF Estimation
     void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
@@ -165,10 +161,10 @@ protected:
     size_t nPriorFactors;                 // Static factors (dont change over time)
     size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
-    double lambdaPrior_reg;               // Weight for regularization prior
     double lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
-    double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
     double lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
+    double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
+    double lambdaPrior_reg;               // Weight for regularization prior (should be very small)
     std::vector<int> m_cells_to_obs;        // Distance in cells to the closest obstacle
     
     struct TobservationGMRF
