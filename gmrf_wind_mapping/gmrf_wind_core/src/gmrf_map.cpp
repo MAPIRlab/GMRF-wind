@@ -135,8 +135,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry1);
                         J.push_back(J_entry2);
                         factor_types.push_back({count, FactorType::Regularization});
-                         //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry);
                         count++;
 
                         // Wy range [N+1,2N]                        
@@ -145,8 +143,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry3);
                         J.push_back(J_entry4);
                         factor_types.push_back({count, FactorType::Regularization});
-                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry2);
                         count++;
                     }
                     else
@@ -158,16 +154,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         Eigen::Triplet<double> J_entry(count, j, 1);
                         J.push_back(J_entry);
                         factor_types.push_back({count, FactorType::Obstacle});
-                        //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                        //Lambda.push_back(lambda_entry);
                         count++;
                         
                         // Wx(j+1) = 0
                         Eigen::Triplet<double> J_entry2(count, j + 1, 1);
                         J.push_back(J_entry2);
                         factor_types.push_back({count, FactorType::Obstacle});
-                        //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                        //Lambda.push_back(lambda_entry2);
                         count++;
                     }
                 }
@@ -178,8 +170,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry);
                     factor_types.push_back({count, FactorType::Obstacle});
                     count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
                 }
                 else if (is_cell_free(j + 1))
                 {
@@ -188,8 +178,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry);
                     factor_types.push_back({count, FactorType::Obstacle});
                     count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
                 }
                 // else --> Both cells occupied -> Do nothing!
             }
@@ -210,8 +198,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry2);
                         factor_types.push_back({count, FactorType::Regularization});
                         count++;
-                        //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_reg);
-                        //Lambda.push_back(lambda_entry);
 
                         // Wy range [N+1,2N]
                         Eigen::Triplet<double> J_entry3(count, j + N, 1);
@@ -220,8 +206,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry4);
                         factor_types.push_back({count, FactorType::Regularization});
                         count++;
-                        // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_reg);
-                        // Lambda.push_back(lambda_entry2);
                     }
                     else
                     {
@@ -233,16 +217,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry);
                         factor_types.push_back({count, FactorType::Obstacle});
                         count++;
-                        // Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                        // Lambda.push_back(lambda_entry);
                         
                         // Force Wy=0 at j+m_size_x
                         Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
                         J.push_back(J_entry2);
                         factor_types.push_back({count, FactorType::Obstacle});
                         count++;
-                        // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                        // Lambda.push_back(lambda_entry2);                        
                     }
                 }
                 else if (is_cell_free(j))
@@ -252,8 +232,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry);
                     factor_types.push_back({count, FactorType::Obstacle});
                     count++;
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry);
                 }
                 else if (is_cell_free(j + m_size_x))
                 {
@@ -262,8 +240,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry2);
                     factor_types.push_back({count, FactorType::Obstacle});
                     count++;
-                    // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                    //Lambda.push_back(lambda_entry2);
                 }
                 // else --> Both cells occupied -> Do nothing!
             }
@@ -275,25 +251,25 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             {
                 // As soon as any of its 8 clossest neighbour cells is free, set the factor
                 bool set = false;
-                if (is_cell_free(j - 1))
+                if (is_cell_free(j - 1)) // W
                 {
                     Eigen::Triplet<double> J_entry(count, j - 1, -1);
                     J.push_back(J_entry);
                     set = true;
                 }
-                if (is_cell_free(j + 1))
+                if (is_cell_free(j + 1)) // E
                 {
                     Eigen::Triplet<double> J_entry(count, j + 1, 1);
                     J.push_back(J_entry);
                     set = true;
                 }
-                if (is_cell_free(j - m_size_x))
+                if (is_cell_free(j - m_size_x)) // S
                 {
                     Eigen::Triplet<double> J_entry(count, j + N - m_size_x, -1);
                     J.push_back(J_entry);
                     set = true;
                 }
-                if (is_cell_free(j + m_size_x))
+                if (is_cell_free(j + m_size_x)) // N
                 {
                     Eigen::Triplet<double> J_entry(count, j + N + m_size_x, 1);
                     J.push_back(J_entry);
@@ -301,7 +277,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 }
 
                 // Diagonals
-                if (is_cell_free(j + m_size_x - 1))
+                if (is_cell_free(j + m_size_x - 1)) // NW
                 {
                     Eigen::Triplet<double> J_entry(count, j + m_size_x - 1, -0.5);
                     Eigen::Triplet<double> J_entry2(count, j + m_size_x - 1 + N, 0.5);
@@ -309,7 +285,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry2);
                     set = true;
                 }
-                if (is_cell_free(j + m_size_x + 1))
+                if (is_cell_free(j + m_size_x + 1)) // NE
                 {
                     Eigen::Triplet<double> J_entry(count, j + m_size_x + 1, 0.5);
                     Eigen::Triplet<double> J_entry2(count, j + m_size_x + 1 + N, 0.5);
@@ -317,7 +293,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry2);
                     set = true;
                 }
-                if (is_cell_free(j - m_size_x + 1))
+                if (is_cell_free(j - m_size_x + 1)) // SE
                 {
                     Eigen::Triplet<double> J_entry(count, j - m_size_x + 1, 0.5);
                     Eigen::Triplet<double> J_entry2(count, j - m_size_x + 1 + N, -0.5);
@@ -325,7 +301,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     J.push_back(J_entry2);
                     set = true;
                 }
-                if (is_cell_free(j - m_size_x - 1))
+                if (is_cell_free(j - m_size_x - 1)) // SW
                 {
                     Eigen::Triplet<double> J_entry(count, j - m_size_x - 1, -0.5);
                     Eigen::Triplet<double> J_entry2(count, j - m_size_x - 1 + N, -0.5);
@@ -338,8 +314,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 if (set)
                 {
                     factor_types.push_back({count, FactorType::FluxConservation});
-                    //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_flux_conservation);
-                    //Lambda.push_back(lambda_entry);
                     count++;
                     set = false;
                 }
@@ -353,30 +327,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nFactors = nPriorFactors + nObsFactors;
         activeObs.clear();
         std::cerr <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
-
-        
-        // DEBUG: Save to file
-        //-------------------
-        /*
-            Eigen::VectorXd y_empty;
-            y_empty.resize(nFactors);
-            y_empty.fill(0.0);
-            save_grmf_factor_graph(J,Lambda,y_empty);
-            */
-
-            // DEGUB : ADD FIXED OBSERVATION
-            /*
-            TobservationGMRF new_obs;
-            const int cellIdx = xy2idx( 3.0, 3.0 );
-            new_obs.cell_idx = cellIdx;
-            new_obs.windX = 0.10;
-            new_obs.windY = 1.0;
-            new_obs.lambda = 13;
-            new_obs.time_invariant = false;		//Default behaviour, the obs will lose weight with time.
-            std::cerr <<  "[GMRF] DEMO obs: Wx = %.2f m/s Wy = %.2f m/s at cell %lu\n\n", new_obs.windX,new_obs.windY,new_obs.cell_idx);
-            activeObs.push_back(new_obs);
-            nObsFactors += 2;    //we add 2 factors for each observation to account for Wx and Wy components
-        */
     }
     catch (std::exception e)
     {
@@ -449,26 +399,14 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
     id_oc = static_cast<int>((cell_1_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                      // x component
     id_oc += static_cast<int>((cell_1_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width; // y component
 
-    /* DEBUG
-    double cellx,celly;
-    cellx = m_Ocgridmap.info.origin.position.x + (id_oc % m_Ocgridmap.info.width)*m_Ocgridmap.info.resolution + m_Ocgridmap.info.resolution/2;
-    celly = m_Ocgridmap.info.origin.position.y + ((size_t) floor(id_oc/m_Ocgridmap.info.width))*m_Ocgridmap.info.resolution +
-    m_Ocgridmap.info.resolution/2;
-    */
 
     try
     {
         // Check occupancy
         if (m_Ocgridmap.data[id_oc] >= 50.0)
-        {
-            // std::cerr <<  "[GMRF] OCCUPIED %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return false;
-        }
         else
-        {
-            // std::cerr <<  "[GMRF] FREE %lu = (%.2f,%.2f) --> %lu in Occ",idx_1_gmrf,cell_1_x,cell_1_y, idx_1_oc);
             return true;
-        }
     }
     catch (std::exception e)
     {
