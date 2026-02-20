@@ -540,9 +540,23 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     }
 }
 
+std::vector<TobservationGMRF> CGMRF_map::getObservations_GMRF()
+{
+    return activeObs;
+}
 
+void CGMRF_map::setObservations_GMRF(const std::vector<TobservationGMRF>& obs)
+{
+    activeObs.clear();
+    activeObs.reserve(obs.size());
+    for (const auto& element : obs)
+        if (element.cell_idx >= 0 && element.cell_idx <= N)
+            activeObs.push_back(element);
+        else
+            std::cerr << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
 
-
+    nObsFactors = activeObs.size() * 2;
+}
 
 void CGMRF_map::clearObservations_GMRF()
 {
@@ -558,8 +572,6 @@ void CGMRF_map::clearObservations_GMRF()
         std::cerr << "=============================================================" << std::endl;
     }
 }
-
-
 
 double CGMRF_map::getLambdaValue(FactorType type) const {
     switch (type) {

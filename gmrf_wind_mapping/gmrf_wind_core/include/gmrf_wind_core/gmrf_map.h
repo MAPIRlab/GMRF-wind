@@ -35,6 +35,25 @@ struct TOccupancyMap
     double origin_y;        // world coordinates of the origin of the map
 };
 
+struct TobservationGMRF
+{
+    size_t cell_idx;
+    // Sensor data in polar coordinates (wind speed and direction)
+    double wind_module;
+    double wind_direction;
+    double var_module;
+    double var_direction;
+    // Cartesian coordinates for the latent space (windX and windY) + full covariance
+    double wind_x;
+    double wind_y;
+    double var_xx;
+    double var_yy;
+    double cov_xy;
+    //double lambda;
+    bool time_invariant; // if the observation will lose weight (lambda) as time goes on (default false)
+};
+
+
 // Data structure to return wind vector estimations
 struct WindVector
 {
@@ -108,6 +127,8 @@ public:
 
     // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
+    std::vector<TobservationGMRF> getObservations_GMRF();
+    void setObservations_GMRF(const std::vector<TobservationGMRF>& obs);
     void clearObservations_GMRF();
     void update_lambdas(double m_lambdaPrior_reg, double m_lambdaPrior_flux_conservation, double m_lambdaPrior_obstacles);
     void read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles);
@@ -163,24 +184,6 @@ protected:
     double lambdaPrior_flux_conservation; // Weight for flux conservation law prior
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
     
-    struct TobservationGMRF
-    {
-        size_t cell_idx;
-        // Sensor data in polar coordinates (wind speed and direction)
-        double wind_module;
-        double wind_direction;
-        double var_module;
-        double var_direction;
-        // Cartesian coordinates for the latent space (windX and windY) + full covariance
-        double wind_x;
-        double wind_y;
-        double var_xx;
-        double var_yy;
-        double cov_xy;
-        //double lambda;
-        bool time_invariant; // if the observation will lose weight (lambda) as time goes on (default false)
-    };
-
     // GMRF Matrices and Structures
     std::vector<Eigen::Triplet<double>> J;          // Jacobian
     std::vector<Eigen::Triplet<double>> Lambda;     // the information matrix (weights or inverse of covariances)
