@@ -150,6 +150,9 @@ namespace Utils
         wind_std_array.scale.x = cell_size;
         wind_std_array.scale.y = cell_size;
 
+        if (max_module < 1e-5)
+            return;
+
         // And one ARROW/POINTS marker per cell for wind_vector/var
         wind_array.markers.reserve(N);
         wind_std_array.points.reserve(N);
@@ -183,8 +186,6 @@ namespace Utils
             }
 
             // Arrow marker for wind vector
-            if (w.module < 0.01 || max_module < 0.01)
-                continue;   // skip near-zero vectors
             
             // Create Arrow marker
             Marker m;
@@ -200,7 +201,7 @@ namespace Utils
             m.pose.position.y = cy;
             m.pose.orientation = createQuaternionMsgFromYaw(atan2(vec.y(), vec.x()));
             // shape
-            m.scale.x = cell_size; // arrow length,
+            m.scale.x = cell_size * w.module / max_module; // arrow length,
             m.scale.y = 0.03;      // arrow width
             m.scale.z = 0.05;      // arrow height
             // color -> must normalize to [0-199]
