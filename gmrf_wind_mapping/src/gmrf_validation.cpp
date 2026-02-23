@@ -23,7 +23,7 @@
 #include <cmath>     // Required for mathematical operations
 
 using namespace std::placeholders;
-
+using namespace gmrfw;
 
 Cvalgt::Cvalgt()
     : Node("GMRF_validation")

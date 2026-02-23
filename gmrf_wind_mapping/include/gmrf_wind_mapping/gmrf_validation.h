@@ -90,7 +90,7 @@ public:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr metric_pub;
 
     // GMRF Map
-    std::unique_ptr<CGMRF_map> gmrf_map;        // The GMRF Map being estimated
+    std::unique_ptr<gmrfw::CGMRF_map> gmrf_map;        // The GMRF Map being estimated
     std::vector<WindVectorXY> gt_map;           // GT wind map from CFD data
     nav_msgs::msg::OccupancyGrid occupancy_map; // Occupancy GridMap of the environment
 
