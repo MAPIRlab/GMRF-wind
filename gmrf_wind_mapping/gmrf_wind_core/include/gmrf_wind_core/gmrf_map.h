@@ -133,6 +133,7 @@ namespace gmrfw
                   Parameters parameters,
                   bool verbose,
                   bool estimateTiming);
+        CGMRF_map(const CGMRF_map& other);
         ~CGMRF_map();
 
         // Observations and Parameters
@@ -195,16 +196,26 @@ namespace gmrfw
         double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
 
         // GMRF Matrices and Structures
-        std::vector<Eigen::Triplet<double>> J;                    // Jacobian
-        std::vector<Eigen::Triplet<double>> Lambda;               // the information matrix (weights or inverse of covariances)
-        std::vector<std::pair<size_t, FactorType>> factor_types;  // Is the Lambda matrix, but with the type of each factor
-        std::vector<TobservationGMRF> activeObs;                  // Vector with the active observations and their respective Information
-        Eigen::SparseMatrix<double> Jsparse;                      // Sparse Jacobian matrix
-        Eigen::SparseMatrix<double> Hsparse;                      // Sparse Information matrix (H = J' * Lambda * J)
-        Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver; // Cholesky solver for the linear system
-        Eigen::VectorXd gradient;                                 // Gradient vector (G = J' * Lambda * y)
-        Eigen::VectorXd m_MAP_sol;                                // Solution vector for the linear system (m_MAP)
-        Eigen::VectorXd residual;                                 // Residual vector (r = J*m_MAP_sol - y)
+        std::vector<Eigen::Triplet<double>> J;                   // Jacobian
+        std::vector<Eigen::Triplet<double>> Lambda;              // the information matrix (weights or inverse of covariances)
+        std::vector<std::pair<size_t, FactorType>> factor_types; // Is the Lambda matrix, but with the type of each factor
+        std::vector<TobservationGMRF> activeObs;                 // Vector with the active observations and their respective Information
+        Eigen::SparseMatrix<double> Jsparse;                     // Sparse Jacobian matrix
+        Eigen::SparseMatrix<double> Hsparse;                     // Sparse Information matrix (H = J' * Lambda * J)
+
+        // wrapper struct to allow the map class to be copyable
+        // the eigen solver cannot be copied, so we would have to manually define a copy constructor that copies each independent member *except* that one (nightmare)
+        // instead, we define this struct which just generates a new solver when copied :)
+        struct Solver 
+        {
+            Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver; // Cholesky solver for the linear system
+            Solver() = default;
+            Solver(const Solver& other) {}
+        } solver;
+
+        Eigen::VectorXd gradient;  // Gradient vector (G = J' * Lambda * y)
+        Eigen::VectorXd m_MAP_sol; // Solution vector for the linear system (m_MAP)
+        Eigen::VectorXd residual;  // Residual vector (r = J*m_MAP_sol - y)
 
         // Util Functions
         bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);

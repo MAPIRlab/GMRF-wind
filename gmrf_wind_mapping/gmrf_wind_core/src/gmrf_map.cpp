@@ -726,8 +726,8 @@ void CGMRF_map::MAP_estimation_GMRF()
         // 6. SOLVE H * m = G
         //----------
         // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
-        solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
-        m_MAP_sol = solver.solve(G);
+        solver.solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
+        m_MAP_sol = solver.solver.solve(G);
         if (verbose)
             std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
 
@@ -780,7 +780,7 @@ void CGMRF_map::computeUncertainty_GMRF()
              std::cerr << "[GMRF] Computing uncertainty for matrix H of size (" << matrix_size << "," << matrix_size << ")..." << std::endl;
 
         // Use the same Cholesky decomposition used for the MAP estimation
-        if (solver.info() != Eigen::Success)
+        if (solver.solver.info() != Eigen::Success)
         {
             // Failed to factorize the matrix. The system might be ill-conditioned or singular.
             std::cerr << "[GMRF-computeUncertainty_GMRF] Error: Failed to compute Cholesky factorization of Hsparse. Cannot compute uncertainty." << std::endl;
@@ -799,7 +799,7 @@ void CGMRF_map::computeUncertainty_GMRF()
             // --- Step 1: Solve for Wx column ---
             e_j.setZero();
             e_j(j) = 1.0;
-            Eigen::VectorXd col_x = solver.solve(e_j);
+            Eigen::VectorXd col_x = solver.solver.solve(e_j);
             
             m_map[j].var = std::max(0.0, col_x(j));             // Variance for Wx is the j-th diagonal element of H^-1
             m_map[j].covariance = std::max(0.0,col_x(j + N));   // Cross-term links Wx and Wy
@@ -807,7 +807,7 @@ void CGMRF_map::computeUncertainty_GMRF()
             // --- Step 2: Solve for Wy column ---
             e_j.setZero();
             e_j(j + N) = 1.0;
-            Eigen::VectorXd col_y = solver.solve(e_j);
+            Eigen::VectorXd col_y = solver.solver.solve(e_j);
             
             m_map[j+N].var = std::max(0.0, col_y(j + N));   // Variance for Wy is the (j+N)-th diagonal element of H^-1
             m_map[j+N].covariance = col_x(j + N);           // Cross-term is the same as before (symmetric)
