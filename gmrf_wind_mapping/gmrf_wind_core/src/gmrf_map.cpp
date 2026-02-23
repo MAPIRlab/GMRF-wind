@@ -8,13 +8,10 @@ using namespace gmrfw;
 /*---------------------------------------------------------------
                         Constructor
   ---------------------------------------------------------------*/
-CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
-                     float cell_size, 
-                     double m_lambdaPrior_reg,
-                     double m_lambdaPrior_flux_conservation, 
-                     double m_lambdaPrior_obstacles,
+CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
+                     Parameters parameters,
                      bool verbose,
-                     bool estimateTiming=false)
+                     bool estimateTiming = false)
 {
     // Set Verbose level
     this->verbose = verbose;
@@ -24,10 +21,10 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
     {
         // Copy params to internal variables
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
-        m_resolution = cell_size; // Desired resolution to build the GMRF (m)
-        lambdaPrior_reg = m_lambdaPrior_reg;
-        lambdaPrior_flux_conservation = m_lambdaPrior_flux_conservation;
-        lambdaPrior_obstacles = m_lambdaPrior_obstacles;
+        m_resolution = parameters.cell_size; // Desired resolution to build the GMRF (m)
+        lambdaPrior_reg = parameters.m_lambdaPrior_reg;
+        lambdaPrior_flux_conservation = parameters.m_lambdaPrior_flux_conservation;
+        lambdaPrior_obstacles = parameters.m_lambdaPrior_obstacles;
         // Compute SQRT values
         
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
@@ -703,25 +700,25 @@ void CGMRF_map::MAP_estimation_GMRF()
         // 5. Build Matrices (J, J', Lambda(A), H, G)
         Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
         Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
 
         Hsparse.resize(2 * N, 2 * N);
         Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
         Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
         
         
@@ -731,7 +728,7 @@ void CGMRF_map::MAP_estimation_GMRF()
         // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
         solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
         m_MAP_sol = solver.solve(G);
-        if (false)
+        if (verbose)
             std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
 
         if (estimateTiming){

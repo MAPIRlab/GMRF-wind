@@ -119,13 +119,18 @@ namespace gmrfw
     class CGMRF_map
     {
     public:
+        struct Parameters
+        {
+            float cell_size = 0.25;
+            double m_lambdaPrior_reg = 1.0;
+            double m_lambdaPrior_flux_conservation = 1.0;
+            double m_lambdaPrior_obstacles = 1.0;
+        };
+
         // Create GMRF from an occupancy gridmap
         // And sets the prior weights for the different factors
         CGMRF_map(const TOccupancyMap& oc_map,
-                  float cell_size,
-                  double m_lambdaPrior_reg,
-                  double m_lambdaPrior_flux_conservation,
-                  double m_lambdaPrior_obstacles,
+                  Parameters parameters,
                   bool verbose,
                   bool estimateTiming);
         ~CGMRF_map();

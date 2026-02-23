@@ -155,14 +155,14 @@ void Cvalgt::initialize()
     occMap.origin_y = occupancy_map.info.origin.position.y;        // world coordinates of the origin of the map
     
     // Create the GMRF-Map and initialize its Prior Factors
-    gmrf_map = std::make_unique<CGMRF_map>(occMap, 
-                                        cell_size, 
-                                        GMRF_lambdaPrior_reg, 
-                                        GMRF_lambdaPrior_flux_conservation,
-                                        GMRF_lambdaPrior_obstacles,
-                                        verbose,
-                                        true // estimateTiming
-                                        );
+    gmrf_map = std::make_unique<CGMRF_map>(occMap,
+                                           CGMRF_map::Parameters{.cell_size = (float)cell_size,
+                                                                 .m_lambdaPrior_reg = GMRF_lambdaPrior_reg,
+                                                                 .m_lambdaPrior_flux_conservation = GMRF_lambdaPrior_flux_conservation,
+                                                                 .m_lambdaPrior_obstacles = GMRF_lambdaPrior_obstacles},
+                                           verbose,
+                                           true // estimateTiming
+    );
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
     module_init = true;
 }
