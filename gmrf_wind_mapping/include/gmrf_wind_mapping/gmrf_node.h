@@ -53,7 +53,7 @@ protected:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wind_std_array_pub;
 
     // GMRF Maps
-    std::unique_ptr<CGMRF_map> my_map;         // The GMRF Map being estimated
+    std::unique_ptr<gmrfw::CGMRF_map> my_map;         // The GMRF Map being estimated
     nav_msgs::msg::OccupancyGrid occupancyMap; // Occupancy GridMap of the environment
 
     // Node Parameters

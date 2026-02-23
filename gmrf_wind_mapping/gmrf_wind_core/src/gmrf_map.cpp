@@ -3,6 +3,7 @@
 #include <iostream>
 #include <iomanip>  // Necesario para std::setprecision
 
+using namespace gmrfw; 
 
 /*---------------------------------------------------------------
                         Constructor

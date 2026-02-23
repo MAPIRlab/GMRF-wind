@@ -98,7 +98,7 @@ namespace Utils
         color_b = temp_color_b[idx_color];
     }
 
-    inline void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, 
+    inline void createWindMarkerArrayFromGMRF(gmrfw::CGMRF_map& my_map, 
                                         std::string frame_id, 
                                         visualization_msgs::msg::MarkerArray& wind_array, 
                                         visualization_msgs::msg::Marker& wind_std_array)
@@ -129,7 +129,7 @@ namespace Utils
         double max_var = 0.0;
         for (size_t i = 0; i < N; ++i)
         {
-            WindVector w = my_map.getEstimation(static_cast<int>(i));
+            gmrfw::WindVector w = my_map.getEstimation(static_cast<int>(i));
             // module 
             if (w.module > max_module)
                 max_module = w.module;
@@ -160,7 +160,7 @@ namespace Utils
         for (size_t i = 0; i < N; ++i)
         {
             // Get wind estimation at cell i
-            WindVector w = my_map.getEstimation(static_cast<int>(i));
+            gmrfw::WindVector w = my_map.getEstimation(static_cast<int>(i));
             Eigen::Vector2d vec = w.asEigen();                              //vec.x(); vec.y()
 
             // Cell center coordinates

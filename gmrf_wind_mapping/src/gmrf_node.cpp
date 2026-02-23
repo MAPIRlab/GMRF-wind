@@ -25,6 +25,7 @@
 #include <cmath>     // Required for mathematical operations
 
 using namespace std::placeholders;
+using namespace gmrfw; 
 
 Cgmrf::Cgmrf()
     : Node("GMRF_wind")

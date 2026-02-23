@@ -87,4 +87,18 @@ install(
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(
+  TARGETS 
+  gmrf_wind_core
+  DESTINATION lib
+)
+
+install(
+  DIRECTORY
+  gmrf_wind_core/include/gmrf_wind_core
+  DESTINATION include
+)
+
+ament_export_include_directories(include)
+ament_export_libraries(gmrf_wind_core)
 ament_package()
