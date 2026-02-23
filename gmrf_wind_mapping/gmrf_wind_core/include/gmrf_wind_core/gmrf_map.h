@@ -133,7 +133,6 @@ namespace gmrfw
                   Parameters parameters,
                   bool verbose,
                   bool estimateTiming);
-        CGMRF_map(const CGMRF_map& other);
         ~CGMRF_map();
 
         // Observations and Parameters
@@ -205,12 +204,13 @@ namespace gmrfw
 
         // wrapper struct to allow the map class to be copyable
         // the eigen solver cannot be copied, so we would have to manually define a copy constructor that copies each independent member *except* that one (nightmare)
-        // instead, we define this struct which just generates a new solver when copied :)
-        struct Solver 
+        // instead, we define this struct which just doesn't copy anything :)
+        struct Solver
         {
             Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver; // Cholesky solver for the linear system
             Solver() = default;
             Solver(const Solver& other) {}
+            Solver& operator=(const Solver& other) { return *this; }
         } solver;
 
         Eigen::VectorXd gradient;  // Gradient vector (G = J' * Lambda * y)
