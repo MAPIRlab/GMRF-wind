@@ -136,7 +136,7 @@ namespace gmrfw
         ~CGMRF_map();
 
         // Observations and Parameters
-        void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
+        bool insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
         std::vector<TobservationGMRF> getObservations_GMRF();
         void setObservations_GMRF(const std::vector<TobservationGMRF>& obs);
         void clearObservations_GMRF();

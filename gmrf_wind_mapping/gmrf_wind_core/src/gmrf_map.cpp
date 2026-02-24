@@ -1,9 +1,9 @@
 #include "gmrf_wind_core/gmrf_map.h"
-#include <cstdio>   // Necesario para fprintf
+#include <cstdio>  // Necesario para fprintf
+#include <iomanip> // Necesario para std::setprecision
 #include <iostream>
-#include <iomanip>  // Necesario para std::setprecision
 
-using namespace gmrfw; 
+using namespace gmrfw;
 
 /*---------------------------------------------------------------
                         Constructor
@@ -20,13 +20,13 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
     try
     {
         // Copy params to internal variables
-        m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
+        m_Ocgridmap = oc_map;                // Occupancy gridMap ( from ROS2 MapServer or other sources)
         m_resolution = parameters.cell_size; // Desired resolution to build the GMRF (m)
         lambdaPrior_reg = parameters.m_lambdaPrior_reg;
         lambdaPrior_flux_conservation = parameters.m_lambdaPrior_flux_conservation;
         lambdaPrior_obstacles = parameters.m_lambdaPrior_obstacles;
         // Compute SQRT values
-        
+
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
         double x_min = oc_map.origin_x;
         double x_max = oc_map.origin_x + oc_map.width * oc_map.resolution;
@@ -42,8 +42,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         // Now the number of cells should be integers:
         m_size_x = round((m_x_max - m_x_min) / m_resolution);
         m_size_y = round((m_y_max - m_y_min) / m_resolution);
-        N = m_size_x * m_size_y;    // Number of cells in the GMRF
-
+        N = m_size_x * m_size_y; // Number of cells in the GMRF
 
         // 1. INIT RANDOM FIELD AND CREATE CONNEXIONS BETWEEN NODES
         //-----------------------------------------------------------
@@ -66,7 +65,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             std::cerr << "[CGMRF] GMRF limits: x=(" << std::fixed << std::setprecision(2) << m_x_min << "," << m_x_max << ")[m] y=(" << m_y_min << "," << m_y_max << ")[m]" << std::endl;
             std::cerr << "[CGMRF] GMRF cell size: (" << m_size_x << "," << m_size_y << ") cells with cell_size " << std::fixed << std::setprecision(2) << m_resolution << "[m]" << std::endl;
             std::cerr << "[CGMRF] GMRF with " << N << " cells and " << m_map.size() << " nodes" << std::endl;
-            std::cerr <<  "--------------------------------" << std::endl;
+            std::cerr << "--------------------------------" << std::endl;
         }
 
         // 2. Memory Reservation (seepUp)
@@ -76,7 +75,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nObsFactors = 0;
         nFactors = nPriorFactors + nObsFactors;
         if (verbose)
-            std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
+            std::cerr << "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
 
         // Reserve memory for the Jacobian and Information matrix
         J.clear();
@@ -84,12 +83,11 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         Lambda.clear();
         Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
 
-       
         // 3. Build Prior Factors (just once if the map is static)
         //----------------------------------------------------------
-        // Given the possibility of using different cell_sizes for the GMRF 
+        // Given the possibility of using different cell_sizes for the GMRF
         // and the provided OccupancyGrid map, we need to employ the OccupancyGrid
-        // map to determine the real interconnections between cells and then 
+        // map to determine the real interconnections between cells and then
         // create the factors between nodes in the GMRF.
         size_t count = 0;
         for (size_t j = 0; j < N; j++) // For each cell in the GMRF
@@ -102,19 +100,19 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             {
                 // Cell is occupied in the provided OccupancyGrid --> Estimation here has no sense
                 // Since we cannot remove this cell, we will force Wx=0 and Wy=0
-                // Wx(j) = 0               
+                // Wx(j) = 0
                 Eigen::Triplet<double> J_entry(count, j, 1);
                 J.push_back(J_entry);
                 factor_types.push_back({count, FactorType::Obstacle});
-                //Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry);
+                // Eigen::Triplet<double> lambda_entry(count, count, lambdaPrior_obstacles);
+                // Lambda.push_back(lambda_entry);
                 count++;
                 // Wy(j) = 0
-                Eigen::Triplet<double> J_entry2(count, j + N, 1);               
+                Eigen::Triplet<double> J_entry2(count, j + N, 1);
                 J.push_back(J_entry2);
                 factor_types.push_back({count, FactorType::Obstacle});
-                //Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
-                //Lambda.push_back(lambda_entry2);
+                // Eigen::Triplet<double> lambda_entry2(count, count, lambdaPrior_obstacles);
+                // Lambda.push_back(lambda_entry2);
                 count++;
             }
 
@@ -135,7 +133,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         factor_types.push_back({count, FactorType::Regularization});
                         count++;
 
-                        // Wy range [N+1,2N]                        
+                        // Wy range [N+1,2N]
                         Eigen::Triplet<double> J_entry3(count, j + N, 1);
                         Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1);
                         J.push_back(J_entry3);
@@ -153,7 +151,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         J.push_back(J_entry);
                         factor_types.push_back({count, FactorType::Obstacle});
                         count++;
-                        
+
                         // Wx(j+1) = 0
                         Eigen::Triplet<double> J_entry2(count, j + 1, 1);
                         J.push_back(J_entry2);
@@ -211,11 +209,11 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         // 1. Do not create a regularization link
                         // 2. Force Wy=0 at both cells
                         // Force Wy=0 at j
-                        Eigen::Triplet<double> J_entry(count, j + N, 1);                        
+                        Eigen::Triplet<double> J_entry(count, j + N, 1);
                         J.push_back(J_entry);
                         factor_types.push_back({count, FactorType::Obstacle});
                         count++;
-                        
+
                         // Force Wy=0 at j+m_size_x
                         Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
                         J.push_back(J_entry2);
@@ -226,7 +224,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 else if (is_cell_free(j))
                 {
                     // Cell j+m_size_x is occupied. Force Wy=0 at j
-                    Eigen::Triplet<double> J_entry(count, j + N, 1);                    
+                    Eigen::Triplet<double> J_entry(count, j + N, 1);
                     J.push_back(J_entry);
                     factor_types.push_back({count, FactorType::Obstacle});
                     count++;
@@ -241,7 +239,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 }
                 // else --> Both cells occupied -> Do nothing!
             }
-
 
             // 3.3 Factors for Law of Mass Conservation (avoid borders of map)
             //----------------------------------------------------------------------------------------
@@ -318,13 +315,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             }
         } // end for setting factors
 
-
         // Total Number of Factors
         //-------------------------
         nPriorFactors = count;
         nFactors = nPriorFactors + nObsFactors;
         activeObs.clear();
-        std::cerr <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
+        std::cerr << "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
     }
     catch (std::exception e)
     {
@@ -341,11 +337,9 @@ CGMRF_map::~CGMRF_map()
 {
 }
 
-
 void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
-                        double m_lambdaPrior_flux_conservation, 
-                        double m_lambdaPrior_obstacles
-                        )
+                               double m_lambdaPrior_flux_conservation,
+                               double m_lambdaPrior_obstacles)
 {
     // Update internal variables
     lambdaPrior_reg = m_lambdaPrior_reg;
@@ -353,7 +347,7 @@ void CGMRF_map::update_lambdas(double m_lambdaPrior_reg,
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_reg, double &m_lambdaPrior_flux_conservation, double &m_lambdaPrior_obstacles)
+void CGMRF_map::read_lambdas(double& m_lambdaPrior_reg, double& m_lambdaPrior_flux_conservation, double& m_lambdaPrior_obstacles)
 {
     m_lambdaPrior_reg = lambdaPrior_reg;
     m_lambdaPrior_flux_conservation = lambdaPrior_flux_conservation;
@@ -380,7 +374,6 @@ void CGMRF_map::id2xy(size_t id, double& x, double& y)
     y = m_y_min + (cell_y * m_resolution) + (m_resolution / 2);
 }
 
-
 /*---------------------------------------------------------------
              Check if a cell is free of obstacles
   ---------------------------------------------------------------*/
@@ -396,7 +389,6 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
     int id_oc;
     id_oc = static_cast<int>((cell_1_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                      // x component
     id_oc += static_cast<int>((cell_1_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width; // y component
-
 
     try
     {
@@ -415,7 +407,6 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
     }
 }
 
-
 /*---------------------------------------------------------------
              Check cell interconnectivity
   ---------------------------------------------------------------*/
@@ -432,10 +423,10 @@ bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2
         // Get corresponding cell_idx in the Occupancy Gridmap
         // IMPORTANT --> Use the resolution and size of Occupancy Gridmap (not the GMRF)
         int idx_1_oc, idx_2_oc;
-        idx_1_oc = static_cast<int>((cell_1_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                        // x component
-        idx_1_oc += static_cast<int>((cell_1_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width;   // y component
-        idx_2_oc = static_cast<int>((cell_2_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                        // x component
-        idx_2_oc += static_cast<int>((cell_2_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width;   // y component
+        idx_1_oc = static_cast<int>((cell_1_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                      // x component
+        idx_1_oc += static_cast<int>((cell_1_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width; // y component
+        idx_2_oc = static_cast<int>((cell_2_x - m_Ocgridmap.origin_x) / m_Ocgridmap.resolution);                      // x component
+        idx_2_oc += static_cast<int>((cell_2_y - m_Ocgridmap.origin_y) / m_Ocgridmap.resolution) * m_Ocgridmap.width; // y component
 
         // check if cells are in the same row of the GMRF map
         bool horizontal = false;
@@ -477,17 +468,16 @@ bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2
     }
 }
 
-
 /*---------------------------------------------------------------
              Insert New Wind Observation
 ---------------------------------------------------------------*/
-void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos)
+bool CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos)
 {
     try
     {
         auto add_obs = [this](const TobservationGMRF& observation)
         {
-            if(observation.cell_idx <0 || observation.cell_idx > N)
+            if (observation.cell_idx < 0 || observation.cell_idx > N)
             {
                 std::cerr << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
                 return;
@@ -501,7 +491,7 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         // Fill new Observation
         // The wind vector provided is already the DownWind direction in the map reference system
         if (x_pos <= m_x_min || x_pos >= m_x_max || y_pos <= m_y_min || y_pos >= m_y_max || !is_cell_free(cellIdx))
-            return;
+            return false;
 
         TobservationGMRF new_obs;
         new_obs.cell_idx = cellIdx;
@@ -517,9 +507,9 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         double theta = wind_direction;
         double var_r = var_wind_speed;
         double var_theta = var_wind_direction;
-        new_obs.var_xx = var_r * cos(theta)*cos(theta) + r*r * var_theta * sin(theta)*sin(theta);
-        new_obs.var_yy = var_r * sin(theta)*sin(theta) + r*r * var_theta * cos(theta)*cos(theta);
-        new_obs.cov_xy = (var_r - r*r * var_theta) * sin(theta) * cos(theta);
+        new_obs.var_xx = var_r * cos(theta) * cos(theta) + r * r * var_theta * sin(theta) * sin(theta);
+        new_obs.var_yy = var_r * sin(theta) * sin(theta) + r * r * var_theta * cos(theta) * cos(theta);
+        new_obs.cov_xy = (var_r - r * r * var_theta) * sin(theta) * cos(theta);
         // Time variant or invariant observation
         new_obs.time_invariant = true; // Default behaviour, the obs will not lose weight with time.
 
@@ -529,12 +519,14 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
         // Add Observation to GMRF
         add_obs(new_obs);
         nObsFactors += 2; // we add 2 factors foe each observation to account for Wx and Wy components
+        return true;
     }
     catch (std::exception e)
     {
         std::cerr << "=============================================================" << std::endl;
         std::cerr << "[GMRF-insertObservation_GMRF] EXCEPTION: " << e.what() << std::endl;
         std::cerr << "=============================================================" << std::endl;
+        return false;
     }
 }
 
@@ -571,12 +563,18 @@ void CGMRF_map::clearObservations_GMRF()
     }
 }
 
-double CGMRF_map::getLambdaValue(FactorType type) const {
-    switch (type) {
-        case FactorType::Regularization: return lambdaPrior_reg;
-        case FactorType::FluxConservation: return lambdaPrior_flux_conservation;
-        case FactorType::Obstacle: return lambdaPrior_obstacles;
-        default: return 0.0;
+double CGMRF_map::getLambdaValue(FactorType type) const
+{
+    switch (type)
+    {
+    case FactorType::Regularization:
+        return lambdaPrior_reg;
+    case FactorType::FluxConservation:
+        return lambdaPrior_flux_conservation;
+    case FactorType::Obstacle:
+        return lambdaPrior_obstacles;
+    default:
+        return 0.0;
     }
 }
 
@@ -588,27 +586,28 @@ void CGMRF_map::MAP_estimation_GMRF()
     try
     {
         /*
-        * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
-        *              J is size (nFactors x NumNodes)
-        *
-        * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
-        *              Lambda is size (nFactors x nFactors).
-        *
-        * Y (vector of observations) contains the values of observations, 0 for prior factors
-        *              y is size (nFactors x 1)
-        *
-        * R (Residuals) Since our system is deterministic, the residuals do not
-        *              need to be re-evaluated on each iteration (we only perform 1 iteration).
-        *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
-        *
-        * H (Hessian) = J' * Lambda * J
-        *               H is size (NumNodes x NumNodes)
-        *
-        * G (gradient) = J' * Lambda * R
-        *               g is size (NumNodes x 1)
-        */
-        
-        if (estimateTiming) meanTimer.start();
+         * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
+         *              J is size (nFactors x NumNodes)
+         *
+         * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
+         *              Lambda is size (nFactors x nFactors).
+         *
+         * Y (vector of observations) contains the values of observations, 0 for prior factors
+         *              y is size (nFactors x 1)
+         *
+         * R (Residuals) Since our system is deterministic, the residuals do not
+         *              need to be re-evaluated on each iteration (we only perform 1 iteration).
+         *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
+         *
+         * H (Hessian) = J' * Lambda * J
+         *               H is size (NumNodes x NumNodes)
+         *
+         * G (gradient) = J' * Lambda * R
+         *               g is size (NumNodes x 1)
+         */
+
+        if (estimateTiming)
+            meanTimer.start();
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
@@ -624,7 +623,7 @@ void CGMRF_map::MAP_estimation_GMRF()
         Eigen::VectorXd y_temp;
         y_temp.resize(nFactors);
         y_temp.fill(0.0);
-        
+
         // LAMBDA PRIOR FACTORS
         for (std::vector<std::pair<size_t, FactorType>>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
         {
@@ -634,7 +633,7 @@ void CGMRF_map::MAP_estimation_GMRF()
         }
 
         // 4. OBSERVATION FACTORS
-        size_t count = nPriorFactors;       // start after the already introduced prior factors
+        size_t count = nPriorFactors; // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
             bool x_y_independent = false;
@@ -643,32 +642,33 @@ void CGMRF_map::MAP_estimation_GMRF()
             {
                 // Each observation translates to 2 factors (Wx,Wy)
                 // Wx range [1,N]
-                Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
+                Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
                 J_temp.push_back(J_entry);
                 y_temp[count] = ito->wind_x;
-                Eigen::Triplet<double> lambda_entry(count, count, 1.0/ito->var_xx);
+                Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
                 Lambda_temp.push_back(lambda_entry);
                 count++;
 
-                // Wy range [N+1,2N]            
-                Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
+                // Wy range [N+1,2N]
+                Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
                 J_temp.push_back(J_entry2);
                 y_temp[count] = ito->wind_y;
-                Eigen::Triplet<double> lambda_entry2(count, count, 1.0/ito->var_yy);
+                Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
                 Lambda_temp.push_back(lambda_entry2);
                 count++;
             }
             else
             {
-                // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
-                // we would need to introduce off-diagonal terms in Lambda.                    
+                // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates),
+                // we would need to introduce off-diagonal terms in Lambda.
 
                 double var_xx = ito->var_xx;
                 double var_yy = ito->var_yy;
                 double cov_xy = ito->cov_xy;
-                // 2. Invert 2x2 matrix to get Precision (Lambda)                
+                // 2. Invert 2x2 matrix to get Precision (Lambda)
                 double det = var_xx * var_yy - cov_xy * cov_xy;
-                if (det < 1e-9) det = 1e-9; // Add small epsilon for numerical stability if r approx 0
+                if (det < 1e-9)
+                    det = 1e-9; // Add small epsilon for numerical stability if r approx 0
 
                 // Lambda_uv = inv(Sigma_xy) = (1/det) * [var_yy, -cov_xy; -cov_xy, var_xx]
                 double L_xx = var_yy / det;
@@ -687,62 +687,61 @@ void CGMRF_map::MAP_estimation_GMRF()
 
                 // Fill the 2x2 Precision Block in Lambda
                 // This links row 'count' and 'count+1'
-                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count,     L_xx)); // diagonal x
+                Lambda_temp.push_back(Eigen::Triplet<double>(count, count, L_xx));         // diagonal x
                 Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count + 1, L_yy)); // diagonal y
-                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count + 1, L_xy)); // cross-term
-                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count,     L_xy)); // cross-term (symmetric)
+                Lambda_temp.push_back(Eigen::Triplet<double>(count, count + 1, L_xy));     // cross-term
+                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count, L_xy));     // cross-term (symmetric)
 
                 count += 2;
             }
         }
 
-        
         // 5. Build Matrices (J, J', Lambda(A), H, G)
         Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
         if (verbose)
-            std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
+            std::cerr << "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
         if (verbose)
-            std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
+            std::cerr << "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
         Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
         if (verbose)
-            std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
+            std::cerr << "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
 
         Hsparse.resize(2 * N, 2 * N);
         Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
         if (verbose)
-            std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
+            std::cerr << "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
-        Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
+        Eigen::VectorXd G = JsparseT * Asparse * y_temp; // size(2*N,1);
         if (verbose)
-            std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
-        
-        
+            std::cerr << "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
+
         //----------
         // 6. SOLVE H * m = G
         //----------
         // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
-        solver.solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
+        solver.solver.compute(Hsparse); // Computes the sparse Cholesky decomposition
         m_MAP_sol = solver.solver.solve(G);
         if (verbose)
-            std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
+            std::cerr << "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
 
-        if (estimateTiming){
+        if (estimateTiming)
+        {
             meanTimer.stop(); // Stop Timer for Mean computation
             auto mean_time_ms = meanTimer.getMeanTimeMs();
             std::cerr << "[GMRF] Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
         }
-        
+
         // 7. Update GMRF values from current solution
         for (size_t j = 0; j < m_map.size(); j++)
         {
-            m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
-            m_map[j].var = 0.0;             // Not estimated yet.
-            m_map[j].covariance = 0.0;             // Not estimated yet.
+            m_map[j].mean = m_MAP_sol(j); // Not iterative! no need to increment previous state
+            m_map[j].var = 0.0;           // Not estimated yet.
+            m_map[j].covariance = 0.0;    // Not estimated yet.
         }
 
         // Calculate the final residual vector (r = J*m - y)
@@ -757,7 +756,6 @@ void CGMRF_map::MAP_estimation_GMRF()
     }
 }
 
-
 void CGMRF_map::computeUncertainty_GMRF()
 {
     // The Hessian H size is (2*N,2*N)
@@ -765,10 +763,11 @@ void CGMRF_map::computeUncertainty_GMRF()
     // The uncertainties (variances) are the diagonal elements of C.
     try
     {
-        if (estimateTiming) stdTimer.start(); // Start Timer for Uncertainty computation        
-        
+        if (estimateTiming)
+            stdTimer.start(); // Start Timer for Uncertainty computation
+
         size_t matrix_size = Hsparse.rows();
-        size_t N = matrix_size / 2;     // Number of cells
+        size_t N = matrix_size / 2; // Number of cells
 
         if (Hsparse.cols() != matrix_size || matrix_size == 0)
         {
@@ -777,7 +776,7 @@ void CGMRF_map::computeUncertainty_GMRF()
         }
 
         if (verbose)
-             std::cerr << "[GMRF] Computing uncertainty for matrix H of size (" << matrix_size << "," << matrix_size << ")..." << std::endl;
+            std::cerr << "[GMRF] Computing uncertainty for matrix H of size (" << matrix_size << "," << matrix_size << ")..." << std::endl;
 
         // Use the same Cholesky decomposition used for the MAP estimation
         if (solver.solver.info() != Eigen::Success)
@@ -800,23 +799,24 @@ void CGMRF_map::computeUncertainty_GMRF()
             e_j.setZero();
             e_j(j) = 1.0;
             Eigen::VectorXd col_x = solver.solver.solve(e_j);
-            
-            m_map[j].var = std::max(0.0, col_x(j));             // Variance for Wx is the j-th diagonal element of H^-1
-            m_map[j].covariance = std::max(0.0,col_x(j + N));   // Cross-term links Wx and Wy
+
+            m_map[j].var = std::max(0.0, col_x(j));            // Variance for Wx is the j-th diagonal element of H^-1
+            m_map[j].covariance = std::max(0.0, col_x(j + N)); // Cross-term links Wx and Wy
 
             // --- Step 2: Solve for Wy column ---
             e_j.setZero();
             e_j(j + N) = 1.0;
             Eigen::VectorXd col_y = solver.solver.solve(e_j);
-            
-            m_map[j+N].var = std::max(0.0, col_y(j + N));   // Variance for Wy is the (j+N)-th diagonal element of H^-1
-            m_map[j+N].covariance = col_x(j + N);           // Cross-term is the same as before (symmetric)
-        }        
-        
-        if (verbose)
-             std::cerr << "[GMRF] Uncertainty computation complete." << std::endl;
 
-        if (estimateTiming){
+            m_map[j + N].var = std::max(0.0, col_y(j + N)); // Variance for Wy is the (j+N)-th diagonal element of H^-1
+            m_map[j + N].covariance = col_x(j + N);         // Cross-term is the same as before (symmetric)
+        }
+
+        if (verbose)
+            std::cerr << "[GMRF] Uncertainty computation complete." << std::endl;
+
+        if (estimateTiming)
+        {
             stdTimer.stop(); // Stop Timer for Uncertainty computation
             auto std_time_ms = stdTimer.getMeanTimeMs();
             std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
@@ -830,29 +830,25 @@ void CGMRF_map::computeUncertainty_GMRF()
     }
 }
 
-
-
-
-
 WindVector CGMRF_map::getEstimation(int index)
 {
     // GMRF stores the wind field as two separate variables per cell: Wx and Wy
-    // index: cell index for Wx, index + N: cell index for Wy    
+    // index: cell index for Wx, index + N: cell index for Wy
     double x = m_map[index].mean;
     double y = m_map[index + N].mean;
     double vx = std::max(0.0001, m_map[index].var);
     double vy = std::max(0.0001, m_map[index + N].var);
     double cov_xy = m_map[index].covariance; // covariance between Wx and Wy
-    
+
     // We convert to polar coordinates (module, direction) and propagate uncertainties
-    double r = sqrt(pow(x, 2) + pow(y, 2)) + 1e-6;  // Add small epsilon for numerical stability if r approx 0
-    double theta = atan2(y, x);                     // Direction in radians, range [-pi, pi]
+    double r = sqrt(pow(x, 2) + pow(y, 2)) + 1e-6; // Add small epsilon for numerical stability if r approx 0
+    double theta = atan2(y, x);                    // Direction in radians, range [-pi, pi]
 
     // Jacobian elements: Cartesian to Polar transformation
     double dr_dx = x / r;
     double dr_dy = y / r;
-    double dth_dx = -y / (r*r);
-    double dth_dy = x / (r*r);
+    double dth_dx = -y / (r * r);
+    double dth_dy = x / (r * r);
 
     // Uncertainty propagation: Sigma_polar = J * Sigma_cartesian * J^T
     double var_r = (dr_dx * dr_dx * vx) + (dr_dy * dr_dy * vy);
@@ -860,17 +856,17 @@ WindVector CGMRF_map::getEstimation(int index)
     double cov_r_theta = (dr_dx * dth_dx * vx) + (dr_dy * dth_dy * vy) + (dr_dx * dth_dy + dr_dy * dth_dx) * cov_xy;
 
     return {
-        r,                          // Module
-        theta,                      // Direction
-        var_r,                      // Sigma_mod
-        var_theta,                  // Sigma_angle (radians)
-        cov_r_theta,                // Covariance between module and angle
-        x,                          // Cartesian x
-        y,                          // Cartesian y
-        vx,                         // Sigma_x
-        vy,                         // Sigma_y
-        cov_xy                      // Covariance between x and y
-        };
+        r,           // Module
+        theta,       // Direction
+        var_r,       // Sigma_mod
+        var_theta,   // Sigma_angle (radians)
+        cov_r_theta, // Covariance between module and angle
+        x,           // Cartesian x
+        y,           // Cartesian y
+        vx,          // Sigma_x
+        vy,          // Sigma_y
+        cov_xy       // Covariance between x and y
+    };
 }
 
 WindVector CGMRF_map::getEstimation(double x, double y)
@@ -878,7 +874,6 @@ WindVector CGMRF_map::getEstimation(double x, double y)
     int i = xy2idx(x, y);
     return getEstimation(i);
 }
-
 
 void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout, std::vector<Eigen::Triplet<double>>& Aout, Eigen::VectorXd& yout)
 {
@@ -915,8 +910,8 @@ void CGMRF_map::save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout
 
     if (save_sparse)
     {
-        std::cerr <<  "[GMRF] Saving Factor-Graph (list of triplets) to file..." << std::endl;
-        std::cerr <<  "[GMRF] Jtriplets(" << Jout.size() << ",3), Atriplets(" << Aout.size() << ",3), numFactors(" << yout.rows() << ")" << std::endl;
+        std::cerr << "[GMRF] Saving Factor-Graph (list of triplets) to file..." << std::endl;
+        std::cerr << "[GMRF] Jtriplets(" << Jout.size() << ",3), Atriplets(" << Aout.size() << ",3), numFactors(" << yout.rows() << ")" << std::endl;
 
         // 1. Jacobian
         std::ofstream file("~/gmrf_Jacobian.txt");
@@ -995,7 +990,6 @@ void CGMRF_map::save_grmf_factor_graph(Eigen::SparseMatrix<double>& H, Eigen::Ve
     }
     file2.close();
 }
-
 
 int CGMRF_map::xy2idx(float x, float y) const
 {
