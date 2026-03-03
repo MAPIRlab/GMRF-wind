@@ -88,7 +88,11 @@ enum class FactorType {
     Vorticity,
     Obstacle,
     Observation,
-    Regularization
+    Regularization,
+    RegularizationHoriz,
+    RegularizationVert,
+    RegularizationDiag1,    // +45 deg
+    RegularizationDiag2     // 135 deg
 };
 
 struct FactorInfo {
@@ -104,6 +108,7 @@ public:
     // And sets the prior weights for the different factors
     CGMRF_map(const TOccupancyMap& oc_map, 
                     float cell_size,
+                    bool factor_select[4],
                     bool verbose,
                     bool estimateTiming);
     ~CGMRF_map();
@@ -111,6 +116,7 @@ public:
     // Observations and Parameters
     void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
     void clearObservations_GMRF();
+    void getObservationsIdx(std::vector<int>& obs_idx);
     void update_lambdas(double m_lambdaPrior_mass, double m_lambdaPrior_vorticity, double m_lambdaPrior_obstacles, double m_lambdaPrior_reg);
     void read_lambdas(double &m_lambdaPrior_mass, double &m_lambdaPrior_vorticity, double &m_lambdaPrior_obstacles, double &m_lambdaPrior_reg);
    
@@ -150,8 +156,7 @@ protected:
     float m_resolution;                       // cell_size (m)
     size_t m_size_x, m_size_y;                // dimensions in CellNumber
     size_t N;                                 // number of cells in the GMRF (we have 2N nodes)
-    bool verbose;
-
+    
     // Time Stats
     bool estimateTiming;
     TimeStats meanTimer;
@@ -161,11 +166,13 @@ protected:
     size_t nPriorFactors;                 // Static factors (dont change over time)
     size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
+    bool verbose;
+    bool factor_select[4];                // Whether to set or not the factors of each type (mass conservation, vorticity, obstacles, regularization)
     double lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
     double lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
     double lambdaPrior_reg;               // Weight for regularization prior (should be very small)
-    std::vector<int> m_cells_to_obs;        // Distance in cells to the closest obstacle
+    std::vector<int> m_cells_to_obs;      // Distance in cells to the closest obstacle
     
     struct TobservationGMRF
     {
@@ -193,17 +200,19 @@ protected:
     Eigen::SparseMatrix<double> Jsparse;            // Sparse Jacobian matrix
     Eigen::SparseMatrix<double> Hsparse;            // Sparse Information matrix (H = J' * Lambda * J)
     Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver;        // Cholesky solver for the linear system
+    //Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;       // LDLT Cholesky solver for the linear system (allows for non-positive definite matrices)
     Eigen::VectorXd gradient;                       // Gradient vector (G = J' * Lambda * y)
     Eigen::VectorXd m_MAP_sol;                     // Solution vector for the linear system (m_MAP)
     Eigen::VectorXd residual;                      // Residual vector (r = J*m_MAP_sol - y)
 
     // Util Functions
     bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
-    double getLambdaValue(FactorType type, size_t cell_idx) const;
+    double getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const;
     void computeDistanceTransform();
-
-    int xy2idx(float x, float y) const;
+    
     void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);
+    size_t cellxy2id(size_t cell_x, size_t cell_y);
+    int xy2idx(float x, float y) const;
     void id2xy(size_t id, double& x, double& y);
 
     // Visualization

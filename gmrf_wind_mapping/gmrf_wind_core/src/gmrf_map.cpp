@@ -10,11 +10,16 @@
   ---------------------------------------------------------------*/
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                     float cell_size,
+                    bool factor_select[4],      // Whether to set or not the factors of each type (mass conservation, vorticity, obstacles, regularization)
                     bool verbose,
                     bool estimateTiming=false)
 {
-    // Set Verbose level
+    // Set Params
     this->verbose = verbose;
+    this->factor_select[0] = factor_select[0];
+    this->factor_select[1] = factor_select[1];
+    this->factor_select[2] = factor_select[2];
+    this->factor_select[3] = factor_select[3];
     this->estimateTiming = estimateTiming;
 
     try
@@ -40,13 +45,11 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         m_size_y = round((m_y_max - m_y_min) / m_resolution);
         N = m_size_x * m_size_y;    // Number of cells in the GMRF
 
-
-        // 1. INIT RANDOM FIELD AND CREATE CONNEXIONS BETWEEN NODES
-        //-----------------------------------------------------------
         std::cerr << "[GMRF_MAP] Generating GMRF for 2D WIND estimation..." << std::endl;
 
+        //---------------------------------------
         // 1. Init the map container (2N cells)
-        //-------------------------
+        //---------------------------------------
         TRandomFieldCell init_cell;
         init_cell.mean = 0.0;
         init_cell.var = 0.0;
@@ -65,65 +68,60 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             std::cerr <<  "--------------------------------" << std::endl;
         }
 
+        //-------------------------------
         // 2. Memory Reservation (seepUp)
         //-------------------------------
         // Approximate number of static factors
-        nPriorFactors = 2 * ((m_size_x - 1) * m_size_y + m_size_x * (m_size_y - 1));
+        nPriorFactors = 8 * N;
         nObsFactors = 0;
         nFactors = nPriorFactors + nObsFactors;
         if (verbose)
+        {
             std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
+            // Inform about the factors that will be set according to the selected priors
+            std::string factor_names[4] = {"Mass Conservation", "Vorticity", "Obstacles", "Regularization"};
+            std::cerr << "[CGMRF] Prior factors selected: ";
+            for (int i = 0; i < 4; i++)
+            {
+                if (factor_select[i])
+                {
+                    std::cerr << factor_names[i] << " ";
+                }
+            }
+            std::cerr << std::endl;
+        }
 
         // Reserve memory for the Jacobian and Information matrix
         J.clear();
-        J.reserve(5 * nFactors); // Each factor accounts for the connectivity of multiple nodes -->multiple entries
+        J.reserve(10 * nFactors); // Each factor accounts for the connectivity of multiple nodes -->multiple entries
         Lambda.clear();
         Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
-
+        factor_types.clear();
        
+        //----------------------------------------------------------
         // 3. Build Prior Factors (just once if the map is static)
         //----------------------------------------------------------
         // Given the possibility of using different cell_sizes for the GMRF 
         // and the provided OccupancyGrid map, we need to employ the OccupancyGrid
         // map to determine the real interconnections between cells and then 
         // create the factors between nodes in the GMRF.
+        
+        // Parameters:
         size_t count = 0;
-        for (size_t j = 0; j < N; j++) // For each cell in the GMRF
+        int reg_order = 1;                  // 0: L1 regularization (wind=0); 1: L2 regularization(penalizes differences)
+        int num_neighbors = 8;              // Whether to consider 4 or 8 neighbors when setting factors.
+        
+        for (size_t j = 0; j < N; j++)
         {
             // Get cell_x and cell_y in the GMRF representation
             size_t jx, jy;
             id2cellxy(j, jx, jy);
 
-            // -----------------------------------
-            // --- 3.1 REGULARIZATION (Wx=Wy=0) --
-            // -----------------------------------
-            int reg_order = 1;
-            if (!is_cell_free(j) || reg_order == 0)
-            {
-                // Force estimation to be 0 at cells with no other information (Damping)
-                {
-                    // Regularization for Wx: 1.0 * Wx(j) = 0
-                    J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                    factor_types.push_back({count, FactorType::Regularization, j});
-                    count++;
-
-                    // Regularization for Wy: 1.0 * Wy(j) = 0
-                    J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                    factor_types.push_back({count, FactorType::Regularization, j});
-                    count++;
-                }
-            }
-            else if (reg_order == 1)
-            {
-                // Tikhonov first order regularization (smoothness prior): Wx(j) - Wx(right) = 0 and Wy(j) - Wy(top) = 0
-                // See OBSTACLES PRIOR for a more detailed regularization that takes into account the presence of obstacles in the map.
-            }
-
-            // -----------------------------------
-            // --- 3.2 MASS CONSERVATION       ---
-            // -----------------------------------
+            // --------------------------------
+            // --- 3.1 MASS CONSERVATION    ---
+            // --------------------------------
             // Eight Neighbor based Divergence free field constraint
-            if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+            if (factor_select[0] && is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
             {
                 // As soon as any of its 8 clossest neighbour cells is free, set the factor
                 bool set_divergence_free = false;
@@ -198,204 +196,216 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             }
 
             // -----------------------------------
-            // --- 3.3 VORTICITY               ---
+            // --- 3.2 VORTICITY               ---
             // -----------------------------------
             // Implementation of: dWy/dx - dWx/dy = 0 Irrotational field constraint
             // Controls the vorticity of the field, that is, it forces to some extent the wind to not have vortices and swirls.
-            int num_neighbors = 8;
-            if (num_neighbors == 4)
+            if (factor_select[1])
             {
-                // 4 neighbors stencil (Von Neumann neighborhood) to compute the derivatives with finite differences. 
-                // We set the factor only if the 4 neighbors are free
-                if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+                if(num_neighbors == 4)
                 {
-                    // Vorticity requires the 4 direct neighbours to be free
-                    bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
-                                                is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
-
-                    if (can_compute_vorticity)
+                    // 4 neighbors stencil (Von Neumann neighborhood) to compute the derivatives with finite differences. 
+                    // We set the factor only if the 4 neighbors are free
+                    if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
                     {
-                        // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
-                        
-                        // Wy components (indices j+N)
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
-                        
-                        // Wx components (indices j)
-                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
-                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
+                        // Vorticity requires the 4 direct neighbours to be free
+                        bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
+                                                    is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
 
-                        factor_types.push_back({count, FactorType::Vorticity, j});
-                        count++;
+                        if (can_compute_vorticity)
+                        {
+                            // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
+                            
+                            // Wy components (indices j+N)
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
+                            
+                            // Wx components (indices j)
+                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
+                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
+
+                            factor_types.push_back({count, FactorType::Vorticity, j});
+                            count++;
+                        }
+                    }
+                }
+                else if(num_neighbors == 8)
+                {
+                    // 8 neighbors stencil (Moore neighborhood) to compute the derivatives with finite differences. 
+                    if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+                    {
+                        // Ensure all 8 neighbors are free to compute a symmetric 8-point curl
+                        bool can_compute_vorticity = 
+                            is_cell_free(j - 1) && is_cell_free(j + 1) &&           // W, E
+                            is_cell_free(j - m_size_x) && is_cell_free(j + m_size_x) && // S, N
+                            is_cell_free(j - m_size_x - 1) && is_cell_free(j - m_size_x + 1) && // SW, SE
+                            is_cell_free(j + m_size_x - 1) && is_cell_free(j + m_size_x + 1);    // NW, NE
+
+                        if (can_compute_vorticity)
+                        {
+                            // We use a weighted stencil for d/dx and d/dy (Sobel-style) 
+                            // to ensure the diagonal neighbors properly constrain the field.
+                            
+                            // --- dWy / dx term ---
+                            // Right neighbors (+)
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) + 1,              1.0));   // E
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x + 1,  0.5));   // NE
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x + 1,  0.5));   // SE
+                            // Left neighbors (-)
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) - 1,             -1.0));  // W
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x - 1, -0.5));  // NW
+                            J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x - 1, -0.5));  // SW
+
+                            // --- dWx / dy term ---
+                            // Top neighbors (-)  [Remember: dWx/dy is subtracted in curl]
+                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x,            -1.0));  // N
+                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x + 1,        -0.5));  // NE
+                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x - 1,        -0.5));  // NW
+                            // Bottom neighbors (+)
+                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x,             1.0));  // S
+                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x + 1,         0.5));  // SE
+                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x - 1,         0.5));  // SW
+
+                            factor_types.push_back({count, FactorType::Vorticity, j});
+                            count++;
+                        }
                     }
                 }
             }
-            else if (num_neighbors == 8)
+
+
+            // ----------------------
+            // --- 3.3 OBSTACLES  ---
+            // ----------------------
+            // Goal: Force wind to zero at boundaries to prevent "bleeding" into walls.
+            int dx_card[] = {1, 0};  // E, N
+            int dy_card[] = {0, 1};  // E, N
+            if (factor_select[2])
             {
-                // 8 neighbors stencil (Moore neighborhood) to compute the derivatives with finite differences. 
-                if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+                // Only consider E and N neighbors (never diagonals)
+                for (int i = 0; i < 2; i++) 
                 {
-                    // Ensure all 8 neighbors are free to compute a symmetric 8-point curl
-                    bool can_compute_vorticity = 
-                        is_cell_free(j - 1) && is_cell_free(j + 1) &&           // W, E
-                        is_cell_free(j - m_size_x) && is_cell_free(j + m_size_x) && // S, N
-                        is_cell_free(j - m_size_x - 1) && is_cell_free(j - m_size_x + 1) && // SW, SE
-                        is_cell_free(j + m_size_x - 1) && is_cell_free(j + m_size_x + 1);    // NW, NE
-
-                    if (can_compute_vorticity)
+                    // neighbor idx
+                    int nx = (int)jx + dx_card[i];
+                    int ny = (int)jy + dy_card[i];
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
+                    
+                    size_t nj = cellxy2id(nx, ny);
+                    
+                    // If one is free and the neighbor is an obstacle (or vice-versa)
+                    if (is_cell_free(j) != is_cell_free(nj)) 
                     {
-                        // We use a weighted stencil for d/dx and d/dy (Sobel-style) 
-                        // to ensure the diagonal neighbors properly constrain the field.
+                        size_t free_cell = is_cell_free(j) ? j : nj;
                         
-                        // --- dWy / dx term ---
-                        // Right neighbors (+)
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) + 1,              1.0));   // E
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x + 1,  0.5));   // NE
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x + 1,  0.5));   // SE
-                        // Left neighbors (-)
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) - 1,             -1.0));  // W
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x - 1, -0.5));  // NW
-                        J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x - 1, -0.5));  // SW
-
-                        // --- dWx / dy term ---
-                        // Top neighbors (-)  [Remember: dWx/dy is subtracted in curl]
-                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x,            -1.0));  // N
-                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x + 1,        -0.5));  // NE
-                        J.push_back(Eigen::Triplet<double>(count, j + m_size_x - 1,        -0.5));  // NW
-                        // Bottom neighbors (+)
-                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x,             1.0));  // S
-                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x + 1,         0.5));  // SE
-                        J.push_back(Eigen::Triplet<double>(count, j - m_size_x - 1,         0.5));  // SW
-
-                        factor_types.push_back({count, FactorType::Vorticity, j});
-                        count++;
+                        if (dx_card[i] != 0) {
+                            // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
+                            J.push_back(Eigen::Triplet<double>(count, free_cell, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, free_cell});
+                            count++;
+                        } else {
+                            // Vertical neighbor: Obstacle is above/below. Force Wy = 0
+                            J.push_back(Eigen::Triplet<double>(count, free_cell + N, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, free_cell});
+                            count++;
+                        }
+                    }
+                    else if ( is_cell_free(j) && is_cell_free(nj) && !check_connectivity_between2cells(j, nj) )
+                    {
+                        // An obstacle is in between cells j and j+1 (not seen due to resolution).
+                        if (dx_card[i] != 0) {
+                            // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
+                            J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, j});
+                            count++;
+                            J.push_back(Eigen::Triplet<double>(count, nj, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, nj});
+                            count++;
+                        } else {
+                            // Vertical neighbor: Obstacle is above/below. Force Wy = 0
+                            J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, j});
+                            count++;
+                            J.push_back(Eigen::Triplet<double>(count, nj + N, 1.0));
+                            factor_types.push_back({count, FactorType::Obstacle, nj});
+                            count++;
+                        }
                     }
                 }
             }
-
-
-            // -------------------------------------
-            // --- 3.4 OBSTACLES + REG_1st_order ---
-            // -------------------------------------
-            // --- 3.4.a  Factors with the right node: (j <--> j+1)
-            //----------------------------------------------------------------
-            if (jx < (m_size_x - 1))
+            
+            // -----------------------------
+            // ---  3.4  REGULARIZATION  ---
+            // -----------------------------
+            if (factor_select[3])
             {
-                if (is_cell_free(j) && is_cell_free(size_t(j + 1)))
+                if (reg_order == 0 || !is_cell_free(j))
                 {
-                    // Cells j and j+1 are free and there is connectivity between them (no obstacle in between)
-                    if (check_connectivity_between2cells(j, size_t(j + 1)))
+                    // L1 regularization: Force Wind estimation to be 0 (Damping)
                     {
-                        // Order 1 Regularization Factor (Tikhonov): cells j and j+1 should have similar wind values
-                        // Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1.0);
-                        Eigen::Triplet<double> J_entry2(count, size_t(j + 1), -1.0);
-                        J.push_back(J_entry1);
-                        J.push_back(J_entry2);
+                        // Regularization for Wx: Wx(j) = 0
+                        J.push_back(Eigen::Triplet<double>(count, j, 1.0));
                         factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
 
-                        // Wy range [N+1,2N]                        
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1.0);
-                        Eigen::Triplet<double> J_entry4(count, size_t(j + N + 1), -1.0);
-                        J.push_back(J_entry3);
-                        J.push_back(J_entry4);
+                        // Regularization for Wy: Wy(j) = 0
+                        J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
                         factor_types.push_back({count, FactorType::Regularization, j});
                         count++;
                     }
-                    else
+                }                
+                else if (reg_order == 1)
+                {
+                    // Tikhonov (L2) regularization: smoothness prior. Force neighboring cells to have similar wind values (Wx and Wy independently).
+                    struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
+                    std::vector<RegNeighbor> reg_nbs= {
+                        {1, 0, FactorType::RegularizationHoriz, false},  // E
+                        {0, 1, FactorType::RegularizationVert,  false}   // N
+                    };
+
+                    if (num_neighbors == 8)
                     {
-                        // An obstacle is in between cells j and j+1. Force Wx=0 at both cells
-                        // Wx(j) = 0
-                        Eigen::Triplet<double> J_entry(count, j, 1.0);
-                        J.push_back(J_entry);
-                        factor_types.push_back({count, FactorType::Obstacle, j});
-                        count++;
+                        // Consider also diagonals
+                        reg_nbs.push_back({1, 1, FactorType::RegularizationDiag1, true});    // NE
+                        reg_nbs.push_back({-1, 1, FactorType::RegularizationDiag2, true});   // NW
+                    }
+                    
+                    for (const auto& nb : reg_nbs) 
+                    {
+                        int nx = (int)jx + nb.dx;
+                        int ny = (int)jy + nb.dy;
+                        if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
                         
-                        // Wx(j+1) = 0
-                        Eigen::Triplet<double> J_entry2(count, j + 1, 1.0);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Obstacle, j + 1});
-                        count++;
-                    }
-                }
-                else if (is_cell_free(j))
-                {
-                    // Cell j+1 is occupied. Force Wx=0 at j
-                    Eigen::Triplet<double> J_entry(count, j, 1);
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle, j});
-                    count++;
-                }
-                else if (is_cell_free(j + 1))
-                {
-                    // Cell j is occupied. Force Wx=0 at j+1
-                    Eigen::Triplet<double> J_entry(count, j + 1, 1);
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle, j + 1});
-                    count++;
-                }
-                // else --> Both cells occupied -> Do nothing!
-            }
+                        // neighbor idx
+                        size_t nj = cellxy2id(nx, ny);
 
-            // --- 3.4.b  Factors with the upper node: (j <--> j+m_size_x)
-            //-----------------------------------------------------------------------
-            if (jy < (m_size_y - 1))
-            {
-                if (is_cell_free(j) && is_cell_free(j + m_size_x))
-                {
-                    if (check_connectivity_between2cells(j, j + m_size_x))
-                    {
-                        // Order 1 Regularization Factor (Tikhonov): cells j and j+m_size_x should have similar wind values
-                        // Wx range [1,N]
-                        Eigen::Triplet<double> J_entry1(count, j, 1.0);
-                        Eigen::Triplet<double> J_entry2(count, j + m_size_x, -1.0);
-                        J.push_back(J_entry1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Regularization, j});
-                        count++;
+                        // Only regularize if BOTH cells are free
+                        if (is_cell_free(j) &&is_cell_free(nj)) 
+                        {
+                            bool can_connect = true;
+                            // If diagonal, check the "elbow" cells to avoid smoothing through corners
+                            if (nb.is_diag) 
+                            {
+                                if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
+                                    can_connect = false;
+                                }
+                            }
 
-                        // Wy range [N+1,2N]
-                        Eigen::Triplet<double> J_entry3(count, j + N, 1.0);
-                        Eigen::Triplet<double> J_entry4(count, j + N + m_size_x, -1.0);
-                        J.push_back(J_entry3);
-                        J.push_back(J_entry4);
-                        factor_types.push_back({count, FactorType::Regularization, j});
-                        count++;
-                    }
-                    else
-                    {
-                        // An obstacle is in between both cells. Force Wy=0 at both cells
-                        // Force Wy=0 at j
-                        Eigen::Triplet<double> J_entry(count, j + N, 1);                        
-                        J.push_back(J_entry);
-                        factor_types.push_back({count, FactorType::Obstacle, j});
-                        count++;
-                        
-                        // Force Wy=0 at j+m_size_x
-                        Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
-                        J.push_back(J_entry2);
-                        factor_types.push_back({count, FactorType::Obstacle, j + m_size_x});
-                        count++;
+                            if (can_connect) 
+                            {
+                                // Smooth Wx
+                                J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                                J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
+                                factor_types.push_back({count, nb.type, j});
+                                count++;
+                                // Smooth Wy
+                                J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                                J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
+                                factor_types.push_back({count, nb.type, j});
+                                count++;
+                            }
+                        }
                     }
                 }
-                else if (is_cell_free(j))
-                {
-                    // Cell j+m_size_x is occupied. Force Wy=0 at j
-                    Eigen::Triplet<double> J_entry(count, j + N, 1);                    
-                    J.push_back(J_entry);
-                    factor_types.push_back({count, FactorType::Obstacle, j});
-                    count++;
-                }
-                else if (is_cell_free(j + m_size_x))
-                {
-                    // Cell j is occupied. Force Wy=0 at j+m_size_x
-                    Eigen::Triplet<double> J_entry2(count, j + N + m_size_x, 1);
-                    J.push_back(J_entry2);
-                    factor_types.push_back({count, FactorType::Obstacle, j + m_size_x});
-                    count++;
-                }
-                // else --> Both cells occupied -> Do nothing!
             }
         } // end for setting factors
 
@@ -466,6 +476,11 @@ void CGMRF_map::id2cellxy(size_t id, size_t& cell_x, size_t& cell_y)
 {
     cell_x = id % m_size_x;
     cell_y = (size_t)floor(id / m_size_x);
+}
+
+size_t CGMRF_map::cellxy2id(size_t cell_x, size_t cell_y)
+{
+    return cell_x + cell_y * m_size_x;
 }
 
 // Get pose x,y (in meters) (in the GMRF representation) from the general index in the array
@@ -667,30 +682,97 @@ void CGMRF_map::clearObservations_GMRF()
     }
 }
 
-
-
-double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx) const
+void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 {
-    switch (type) 
+    obs_idx.clear();
+    for (const auto& obs : activeObs)
     {
-        case FactorType::Regularization: return lambdaPrior_reg;
-        case FactorType::MassConservation: return lambdaPrior_mass_conservation;
-        case FactorType::Obstacle: return lambdaPrior_obstacles;
-        case FactorType::Vorticity: 
-            {
-                int cell_steps = m_cells_to_obs[cell_idx];  //Number of cells to the nearest obstacle
-                int d_laminar = 4; // Min Number of cells to nearest obstacle to consider as "laminar flow" (high lambda)
-
-                // Dinamic Lmabda weight
-                // Open Areas (large distance to obstacles) --> High lambda to avoid vortices and swirls
-                // Narrow Passages (small distance to obstacles) --> Low lambda to allow vortices
-                double lambda_vort = lambdaPrior_vorticity / (1.0 + std::exp(-5*(cell_steps - d_laminar))); // Sigmoid function to smoothly transition between low and high lambda values based on the distance to the nearest obstacle
-                return lambdaPrior_vorticity;
-                return lambda_vort;
-            }
-        default: return 0.0;
+        obs_idx.push_back(obs.cell_idx);
     }
 }
+
+
+/**
+ * @brief Calculates the dynamic weight (Lambda) for a specific factor.
+ * @param type The type of the factor (Regularization direction, Obstacle, etc.)
+ * @param cell_idx The index of the primary cell associated with the factor.
+ * @param ux Previous estimation of the X-component of the wind at cell_idx.
+ * @param uy Previous estimation of the Y-component of the wind at cell_idx.
+ * @return double The calculated weight (Lambda).
+ */
+double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const
+{
+    // 1. Handle cases where a previous wind estimation is not available (Step 1)
+    // or magnitude is too low to determine a sensitive direction --> isotropic regularization.
+    double mag_sq = ux * ux + uy * uy;
+    double mag = std::sqrt(mag_sq);
+    double magnitude_softening = 1.0 / (1.0 + mag);     // wind speed dependent
+    double effective_lambda_reg = lambdaPrior_reg * magnitude_softening;
+
+    bool has_valid_direction = !std::isnan(ux) && !std::isnan(uy) && mag_sq > 1e-6;
+
+    // Hyperparameter: Ratio of smoothing perpendicular to flow vs. along flow.
+    // 1.0 = Isotropic (Standard), 0.1 = Highly Anisotropic (Preserves sharp edges).
+    const double alpha = 0.01;
+    const double alpha_base = 0.05; 
+    double dynamic_alpha = alpha_base / (1.0 + mag);
+  
+
+
+    // Helper to calculate anisotropic weight based on alignment with a unit vector (cos, sin)
+    auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal) 
+    {
+        if (!has_valid_direction) {
+            // Default to isotropic if no wind info is available.
+            // Diagonals are scaled by 0.5 due to distance (1/sqrt(2))^2.
+            return effective_lambda_reg * (is_diagonal ? 0.5 : 1.0);
+        }
+
+        // Project wind vector onto the connection axis: (W · Axis) / |W|
+        // We square the result to get the "alignment" factor [0, 1]
+        double dot_product = (ux * axis_x + uy * axis_y);
+        double alignment = (dot_product * dot_product) / mag_sq;
+
+        // Final Weight: High alignment -> lambda_reg, Low alignment -> lambda_reg * alpha
+        //double weight = lambdaPrior_reg * (alignment + (1.0 - alignment) * alpha);
+        double weight = effective_lambda_reg * (alignment + (1.0 - alignment) * dynamic_alpha);
+
+        // Scale by distance squared for diagonals
+        return is_diagonal ? weight * 0.5 : weight;
+    };
+
+    switch (type) 
+    {
+        case FactorType::MassConservation: return lambdaPrior_mass_conservation;
+        case FactorType::Vorticity: 
+        {
+            // Use the distance transform to allow more "turbulence" near obstacles
+            // and force "a bit more" laminar flow in open areas.
+            int cell_steps = m_cells_to_obs[cell_idx];
+            int d_laminar = 4;
+            double sigmoid_weight = 1.0 / (1.0 + std::exp(-5.0 * (cell_steps - d_laminar)));
+            return lambdaPrior_vorticity * sigmoid_weight;
+        }
+        case FactorType::Obstacle: return lambdaPrior_obstacles;
+        case FactorType::Regularization: return lambdaPrior_reg; // Isotropic regularization (default)
+        // --- Anisotropic Regularization ---
+        case FactorType::RegularizationHoriz:
+            return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
+        case FactorType::RegularizationVert:
+            return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
+        case FactorType::RegularizationDiag1:
+            return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
+        case FactorType::RegularizationDiag2:
+            return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
+        
+        default: 
+        {
+            std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
+            return 0.0001;
+        }
+    }
+}
+
 
 
 void CGMRF_map::computeDistanceTransform() 
@@ -790,8 +872,8 @@ void CGMRF_map::MAP_estimation_GMRF()
         // LAMBDA PRIOR FACTORS
         for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
         {
-            // Get lambda value for the factor type            
-            double lambda_value = getLambdaValue(it->type, it->cell_idx);
+            // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)          
+            double lambda_value = getLambdaValue(it->type, it->cell_idx, m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean);
             Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
             Lambda_temp.push_back(lambda_entry);
         }
@@ -800,7 +882,7 @@ void CGMRF_map::MAP_estimation_GMRF()
         size_t count = nPriorFactors;       // start after the already introduced prior factors
         for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
         {
-            bool x_y_independent = false;
+            bool x_y_independent = true;
 
             if (x_y_independent)
             {
@@ -863,33 +945,88 @@ void CGMRF_map::MAP_estimation_GMRF()
         // 5. Build Matrices (J, J', Lambda(A), H, G)
         Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
         Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
         Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
         Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
-        if (false)
-            std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")";
+        if (verbose)
+            std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")" << std::endl;
 
         Hsparse.resize(2 * N, 2 * N);
         Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
         Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
-        if (false)
+        if (verbose)
             std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
         
         
-        //----------
+        //----------------------
         // 6. SOLVE H * m = G
-        //----------
-        // We use a Cholesky Factorization of Hessian --> chol( P * H * inv(P) )
+        //----------------------
+        // Sanity check for NaNs or Infs in Hsparse before factorization
+        if (!Hsparse.coeffs().allFinite()) 
+        {
+            std::cerr << "=============================================================" << std::endl;
+            std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Hessian matrix contains NaNs or Infs." << "\033[0m" << std::endl;
+            std::cerr << "=============================================================" << std::endl;
+            return;
+        }
+
+        // DEBUG: NUMERICAL STABILITY CHECK
+        // ----------------------------------
+        if (false)
+        {
+            // Check the diagonal values of Hsparse to identify potential zero or near-zero entries that could indicate singularity or ill-conditioning.
+            std::cerr << "H max diag: " << Hsparse.diagonal().maxCoeff() << std::endl;
+            std::cerr << "H min diag: " << Hsparse.diagonal().minCoeff() << std::endl;
+            
+            Eigen::VectorXd diag = Hsparse.diagonal();
+            if (diag.size() != 2 * N) 
+            {
+                std::cerr << "Error de dimensiones: Diag " << diag.size() << " vs 2*N " << 2*N << std::endl;
+                return;
+            }
+            
+            int zero_count = 0;
+            for (int i = 0; i < diag.size(); ++i) {
+                if (std::abs(diag(i)) < 1e-12) {
+                    zero_count++;
+                    if (zero_count < 10) { // Solo imprimimos los primeros 10 para no colapsar
+                        int cell_idx = (i < N) ? i : i - N;
+                        const char* comp = (i < N) ? "Wx" : "Wy";
+                        std::cerr << "[GMRF] Nodo " << i << " (Celda " << cell_idx << " " << comp << ") es CERO." << std::endl;
+                    }
+                }
+            }
+            std::cerr << "[GMRF] Total de nodos sin restricciones: " << zero_count << " de " << diag.size() << std::endl;
+
+            // Add small value to diagonal for numerical stability (Tikhonov regularization)
+            double epsilon = 1e-6;
+            Hsparse.diagonal().array() += epsilon;
+        }
+
+        // Cholesky Factorization of Hessian (H = L * D * L')
         solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
+        if (solver.info() != Eigen::Success)
+        {
+            // In red color for better visibility
+            std::cerr << "=============================================================" << std::endl;
+            std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Failed to compute Cholesky factorization of Hsparse. The system might be ill-conditioned or singular. MAP estimation cannot proceed." << "\033[0m" << std::endl;
+            std::cerr << "=============================================================" << std::endl;
+           
+            std::string ComputationInfo[4] = {"Success", "NumericalIssue", "NoConvergence", "InvalidInput"};
+            std::cerr << "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << std::endl;
+            return;
+        }
+
+        // Get MAP solution: m_MAP_sol = H^-1 * G
         m_MAP_sol = solver.solve(G);
         if (false)
             std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
@@ -905,12 +1042,14 @@ void CGMRF_map::MAP_estimation_GMRF()
         {
             m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
             m_map[j].var = 0.0;             // Not estimated yet.
-            m_map[j].covariance = 0.0;             // Not estimated yet.
+            m_map[j].covariance = 0.0;      // Not estimated yet.
         }
 
         // Calculate the final residual vector (r = J*m - y)
         residual = Jsparse * m_MAP_sol - y_temp;
-        std::cerr << "[GMRF] MAP estimated with residual norm " << residual.norm() << std::endl;
+        // Calculate the norm of the residual with the Asparse weights: sqrt(r' * A * r)
+        double weighted_residual_norm = sqrt(residual.transpose() * Asparse * residual);
+        std::cerr << "[GMRF] MAP estimated with residual norm " << residual.norm() << " (weighted: " << weighted_residual_norm << ")" << std::endl;
     }
     catch (std::exception e)
     {
