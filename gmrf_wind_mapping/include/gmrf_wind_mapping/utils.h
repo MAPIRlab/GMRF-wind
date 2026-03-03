@@ -8,6 +8,7 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include "gmrf_wind_core/gmrf_map.h"
 
 namespace Utils
 {
@@ -54,7 +55,7 @@ namespace Utils
         return occupancyGrid;
     }
 
-    void get_arrow_color(double module, double max_module, float& color_r, float& color_g, float& color_b)
+    inline void get_arrow_color(double module, double max_module, float& color_r, float& color_g, float& color_b)
     {
         // Predefined colormap (jet-like) with 200 entries
         // Declare the arrays as static. Initialization only happens once.
@@ -97,7 +98,7 @@ namespace Utils
         color_b = temp_color_b[idx_color];
     }
 
-    void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, 
+    inline void createWindMarkerArrayFromGMRF(CGMRF_map& my_map, 
                                         std::string frame_id, 
                                         visualization_msgs::msg::MarkerArray& wind_array, 
                                         visualization_msgs::msg::Marker& wind_std_array)
