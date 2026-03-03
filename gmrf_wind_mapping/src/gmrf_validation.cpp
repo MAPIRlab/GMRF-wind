@@ -155,8 +155,14 @@ void Cvalgt::initialize()
     occMap.origin_y = occupancy_map.info.origin.position.y;         // world coordinates of the origin of the map
     
     // Create the GMRF-Map and initialize its Prior Factors with the parameters from the ROS2 params server
+    // Set only factors with a Lambda_prior > 0, (avoids adding unnecessary factors to the graph)
+    bool factor_select[4] = {GMRF_lambdaPrior_mass_conservation > 0, 
+                            GMRF_lambdaPrior_vorticity > 0, 
+                            GMRF_lambdaPrior_obstacles > 0, 
+                            GMRF_lambdaPrior_reg > 0};
     gmrf_map = std::make_unique<CGMRF_map>(occMap,
                                         cell_size,
+                                        factor_select,
                                         verbose,
                                         true // estimateTiming
                                         );
@@ -330,6 +336,49 @@ inline void Cvalgt::ReadGroundTruthWindMap(const std::string& filename)
     catch (const std::exception& e)
     {
         RCLCPP_ERROR(get_logger(), "[Cvalgt] Exception caught while reading CFD ground-truth wind map: '%s'", e.what());
+    }
+}
+
+
+void Cvalgt::SimulateFixedWindObservations()
+{
+    // Insert fixed observations from the GT map (for testing purposes)
+
+    Eigen::Vector2i dimensions = gmrf_map->map_size();
+    double N = dimensions.x()*dimensions.y() - 1;
+    std::vector<size_t> observation_indices;
+    for (size_t i = 320; i <= 460; i+=35) // Take one observation every 50 cells
+        observation_indices.push_back(i);
+
+    for (size_t idx : observation_indices)
+    {
+        // Ensure index is within bounds of the GT map
+        if (idx >= gt_map.size())
+        {
+            RCLCPP_WARN(get_logger(), "[Cvalgt] Observation index %zu is out of bounds for GT map size %zu. Skipping this observation.", idx, gt_map.size());
+            continue;
+        }
+       
+        // Ensure cell is free
+        if (!gmrf_map->is_cell_free(idx))
+        {
+            RCLCPP_WARN(get_logger(), "[Cvalgt] Observation index %zu corresponds to a non-free cell. Skipping this observation.", idx);
+            continue;
+        }
+        
+        // Read GT wind at that cell
+        double wind_speed_x = gt_map[idx].x;
+        double wind_speed_y = gt_map[idx].y;
+        double module = sqrt(pow(wind_speed_x,2) + pow(wind_speed_y,2));
+        double direction = atan2(wind_speed_y, wind_speed_x);
+
+        // Cell center coordinates
+        double x_pos_meters, y_pos_meters;
+        x_pos_meters = gmrf_map->map_dimensions_meters()[0] + (idx % dimensions.x() + 0.5) * cell_size;
+        y_pos_meters = gmrf_map->map_dimensions_meters()[2] + (idx / dimensions.x() + 0.5) * cell_size;
+
+        // Insert observation in GRMF
+        gmrf_map->insertObservation_GMRF(module, direction, observation_var_wind_speed, observation_var_wind_direction, x_pos_meters, y_pos_meters);        
     }
 }
 
@@ -697,6 +746,8 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
     // Header
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     size_t N = dimensions.x()*dimensions.y();
+    std::vector<int> observed_cells;
+    gmrf_map->getObservationsIdx(observed_cells);
 
     std::ofstream csv_file;
     csv_file.open(file_name);
@@ -705,6 +756,10 @@ void Cvalgt::saveGMRFEstimationToCSV(const std::string& file_name)
     csv_file << "Dimensions_x," << dimensions.x() << "\n";
     csv_file << "Dimensions_y," << dimensions.y() << "\n";
     csv_file << "Cell_size," << cell_size << "\n";
+    csv_file << "N_observations," << observed_cells.size() << "\n";
+    csv_file << "Obs_idx,";
+    for (size_t i = 0; i < observed_cells.size(); ++i)        
+        csv_file << observed_cells[i] << (i < observed_cells.size() - 1 ? "," : "\n");
     csv_file << "cell_index,"
              << "gmrf_wind_x,"
              << "gmrf_wind_y,"
@@ -1010,32 +1065,29 @@ int main(int argc, char** argv)
     {
         // Simple GMRF estimation with fixed Lambdas
         // =========================================
-
         // Initial values for the Lambda precision parameters (from ROS2 params)
         double parameters[4] = {my_gmrf_map->GMRF_lambdaPrior_mass_conservation,
                                 my_gmrf_map->GMRF_lambdaPrior_vorticity,
                                 my_gmrf_map->GMRF_lambdaPrior_obstacles,
                                 my_gmrf_map->GMRF_lambdaPrior_reg};
-
-        // Simulate 50 noisy random observations (wont change during the test)
-        my_gmrf_map->SimulateWindObservations(50);
-
-        // Update GMRF with new lambda values
         my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
-        
-        // Perform MAP + Uncertainty estimation
-        my_gmrf_map->update();
 
-        // Save GMRF estimation to CSV
-        std::string file_name = "gmrf_estimation_lambda_" + 
-                                std::to_string(parameters[0]) + "_" + 
-                                std::to_string(parameters[1]) + "_" + 
-                                std::to_string(parameters[2]) + "_" + 
-                                std::to_string(parameters[3]) + ".csv";
+        // Simulate N noisy random observations (wont change during the test)
+        my_gmrf_map->SimulateFixedWindObservations();
+        //my_gmrf_map->SimulateWindObservations(50);
+
+        // Perform MAP + Uncertainty estimation (twice to apply anisotropic regularization based on the first estimation)
+        my_gmrf_map->update();
+        std::string file_name = "gmrf_estimation_pass1.csv";
+        my_gmrf_map->saveGMRFEstimationToCSV(file_name);
+
+        my_gmrf_map->update();
+        file_name = "gmrf_estimation_pass2.csv";
         my_gmrf_map->saveGMRFEstimationToCSV(file_name);
 
         break;
 
+        /*
         // Iterate over each of the parameter positions
         // Define the set of values you want to test
         std::vector<double> test_values = {0.01, 0.1, 1.0, 10.0, 100.0, 1000.0};
@@ -1069,6 +1121,7 @@ int main(int argc, char** argv)
         }
         
         break;
+        */
     }
     default:
         break;

@@ -45,6 +45,7 @@ public:
     void publishMaps();
     std::array<double, 4> compute_performance_metrics() const;
     void SimulateWindObservations(size_t N_obs);
+    void SimulateFixedWindObservations();
     void update_lambdas(double lambda_mass, double lambda_vort, double lambda_obst, double lambda_reg);
     void read_lambdas(double &lambda_mass, double &lambda_vort, double &lambda_obst, double &lambda_reg);
     void saveGMRFEstimationToCSV(const std::string& file_name);
