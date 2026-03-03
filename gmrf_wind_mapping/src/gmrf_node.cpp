@@ -181,8 +181,14 @@ void Cgmrf::initialize()
     occMap.origin_y = occupancyMap.info.origin.position.y;        // world coordinates of the origin of the map
     
     // Create the GMRF-Map and initialize its Prior Factors
+    // Set only factors with a Lambda_prior > 0, (avoids adding unnecessary factors to the graph)
+    bool factor_select[4] = {GMRF_lambdaPrior_mass_conservation > 0, 
+                            GMRF_lambdaPrior_vorticity > 0, 
+                            GMRF_lambdaPrior_obstacles > 0, 
+                            GMRF_lambdaPrior_reg > 0};
     my_map = std::make_unique<CGMRF_map>(occMap, 
                                         cell_size,
+                                        factor_select,
                                         verbose,
                                         true // estimateTiming
                                         );
