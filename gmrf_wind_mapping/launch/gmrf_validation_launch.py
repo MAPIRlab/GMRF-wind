@@ -29,12 +29,12 @@ def launch_setup(context, *args, **kwargs):
             {"verbose": True},                               # Verbose mode for debugging
             {"visualize_gmrf": False},                        # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"observation_var_wind_speed": 0.0025},            # Variance of the wind speed measurement (m/s)^2
-            {"observation_var_wind_direction": 0.0025},        # Variance of the wind direction measurement (rad)^2
-            {"GMRF_lambdaPrior_mass_conservation": 100.0},     # Mass conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_vorticity": 0.001},             # Vorticity constraint -> curl of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 0.001},             # Obstacles --> cells close to obstacles has only tangencial wind
-            {"GMRF_lambdaPrior_regularization": 10.0},         # Regularization (Tikhonov) -> neighboring cells should have similar wind values
+            {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
+            {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
+            {"GMRF_lambdaPrior_mass_conservation": 10.0},      # Mass conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_vorticity": 0.0},               # Vorticity constraint -> curl of the wind field is zero
+            {"GMRF_lambdaPrior_obstacles": 0.0},               # Obstacles --> cells close to obstacles has only tangencial wind
+            {"GMRF_lambdaPrior_regularization": 50.0},          # Regularization (Tikhonov) -> neighboring cells should have similar wind values
             {"experiment_number": 2},                          # 1: Full Optimization, 2: Fixed lambdas.
         ]
     )
