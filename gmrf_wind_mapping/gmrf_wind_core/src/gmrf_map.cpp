@@ -83,9 +83,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         {
             std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
             // Inform about the factors that will be set according to the selected priors
-            std::string factor_names[4] = {"Mass Conservation", "Vorticity", "Obstacles", "Regularization"};
+            std::string factor_names[5] = {"Advection", "Mass Conservation", "Diffusion", "Vorticity", "Obstacles"};
             std::cerr << "[CGMRF] Prior factors selected: ";
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 5; i++)
             {
                 if (factor_select[i])
                 {
@@ -781,7 +781,7 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
     auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal) 
     {
         if (!has_valid_direction) {
-            return 0.001; // Low wind: negligible advection
+            return 0.0; // Low wind: negligible advection
         }
 
         // Project wind vector onto the connection axis: (W · Axis) / |W|
@@ -791,8 +791,13 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
         
         double weight = lambdaPrior_advection * alignment * alignment; // Square to emphasize strong alignments and de-emphasize weak ones
 
-        // Scale by distance squared for diagonals
-        return std::max(weight, 0.001); // Ensure a minimum weight to prevent complete disconnection (numerical stability)
+        // Use the distance transform to allow more "turbulence" near obstacles
+        // This will reduce the advection weight close to obstacles
+        int cell_steps = m_cells_to_obs[cell_idx];
+        int d_sublayer = 4;
+        double sigmoid_weight = 1.0 / (1.0 + std::exp(-5.0 * (cell_steps - d_sublayer)));
+
+        return weight * sigmoid_weight;
     };
 
     switch (type) 
@@ -913,18 +918,6 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
-
-        // 2. Setup the prior part of Jacobian (fixed)
-        std::vector<Eigen::Triplet<double>> J_temp;
-        J_temp.reserve(J.size() + nObsFactors);
-        std::copy(J.begin(), J.end(), back_inserter(J_temp));
-
-        // 3. Setup Lambda matrix and data (y) vector
-        std::vector<Eigen::Triplet<double>> Lambda_temp;
-        Lambda_temp.reserve(nFactors);
-        Eigen::VectorXd y_temp;
-        y_temp.resize(nFactors);
-        y_temp.fill(0.0);
         
         // -----------------------------------------
         // ITERATIVE PICARD-LIKE APPROACH TO UPDATE LAMBDA
@@ -932,6 +925,18 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
         double prev_weighted_residual_norm = std::numeric_limits<double>::max();
         for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
+            // 2. Setup the prior part of Jacobian (fixed)
+            std::vector<Eigen::Triplet<double>> J_temp;
+            J_temp.reserve(J.size() + nObsFactors);
+            std::copy(J.begin(), J.end(), back_inserter(J_temp));
+
+            // 3. Setup Lambda matrix and data (y) vector
+            std::vector<Eigen::Triplet<double>> Lambda_temp;
+            Lambda_temp.reserve(nFactors);
+            Eigen::VectorXd y_temp;
+            y_temp.resize(nFactors);
+            y_temp.fill(0.0);
+
             // LAMBDA PRIOR FACTORS (Dynamic values based on current wind estimation)
             for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
             {
