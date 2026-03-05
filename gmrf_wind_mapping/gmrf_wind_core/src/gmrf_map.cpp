@@ -789,15 +789,8 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
         double dot_product = (ux * axis_x + uy * axis_y);
         double alignment = std::abs(dot_product) / mag; // Cosine of the angle between wind and axis (absolute value)
         
-        double weight = lambdaPrior_advection * alignment * alignment; // Square to emphasize strong alignments and de-emphasize weak ones
-
-        // Use the distance transform to allow more "turbulence" near obstacles
-        // This will reduce the advection weight close to obstacles
-        int cell_steps = m_cells_to_obs[cell_idx];
-        int d_sublayer = 4;
-        double sigmoid_weight = 1.0 / (1.0 + std::exp(-5.0 * (cell_steps - d_sublayer)));
-
-        return weight * sigmoid_weight;
+        double weight = lambdaPrior_advection * pow(alignment,10);
+        return weight;
     };
 
     switch (type) 
