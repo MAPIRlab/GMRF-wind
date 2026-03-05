@@ -882,7 +882,7 @@ void CGMRF_map::computeDistanceTransform()
 /*---------------------------------------------------------------
                 MAXIMUM A POSTERIORI Estimation GMRF
   ---------------------------------------------------------------*/
-void CGMRF_map::MAP_estimation_GMRF()
+void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
 {
     try
     {
@@ -906,7 +906,9 @@ void CGMRF_map::MAP_estimation_GMRF()
         * G (gradient) = J' * Lambda * R
         *               g is size (NumNodes x 1)
         */
-        
+        if (verbose)
+            std::cerr << "[CGMRF-MAP] Starting MAP Estimation with " << m_picard_iterations << " Picard-like iterations..." << std::endl;
+
         if (estimateTiming) meanTimer.start();
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
@@ -924,187 +926,206 @@ void CGMRF_map::MAP_estimation_GMRF()
         y_temp.resize(nFactors);
         y_temp.fill(0.0);
         
-        // LAMBDA PRIOR FACTORS
-        for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
+        // -----------------------------------------
+        // ITERATIVE PICARD-LIKE APPROACH TO UPDATE LAMBDA
+        // -----------------------------------------
+        double prev_weighted_residual_norm = std::numeric_limits<double>::max();
+        for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
-            // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)          
-            double lambda_value = getLambdaValue(it->type, it->cell_idx, m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean);
-            Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
-            Lambda_temp.push_back(lambda_entry);
-        }
-
-        // 4. OBSERVATION FACTORS
-        size_t count = nPriorFactors;       // start after the already introduced prior factors
-        for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
-        {
-            bool x_y_independent = true;
-
-            if (x_y_independent)
+            // LAMBDA PRIOR FACTORS (Dynamic values based on current wind estimation)
+            for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
             {
-                // Each observation translates to 2 factors (Wx,Wy)
-                // Wx range [1,N]
-                Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
-                J_temp.push_back(J_entry);
-                y_temp[count] = ito->wind_x;
-                Eigen::Triplet<double> lambda_entry(count, count, 1.0/ito->var_xx);
+                // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)          
+                double lambda_value = getLambdaValue(it->type, it->cell_idx, m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean);
+                Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
                 Lambda_temp.push_back(lambda_entry);
-                count++;
-
-                // Wy range [N+1,2N]            
-                Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
-                J_temp.push_back(J_entry2);
-                y_temp[count] = ito->wind_y;
-                Eigen::Triplet<double> lambda_entry2(count, count, 1.0/ito->var_yy);
-                Lambda_temp.push_back(lambda_entry2);
-                count++;
             }
-            else
+
+            // 4. OBSERVATION FACTORS
+            size_t count = nPriorFactors;       // start after the already introduced prior factors
+            for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
             {
-                // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
-                // we would need to introduce off-diagonal terms in Lambda.                    
+                bool x_y_independent = false;
 
-                double var_xx = ito->var_xx;
-                double var_yy = ito->var_yy;
-                double cov_xy = ito->cov_xy;
-                // 2. Invert 2x2 matrix to get Precision (Lambda)                
-                double det = var_xx * var_yy - cov_xy * cov_xy;
-                if (det < 1e-9) det = 1e-9; // Add small epsilon for numerical stability if r approx 0
+                if (x_y_independent)
+                {
+                    // Each observation translates to 2 factors (Wx,Wy)
+                    // Wx range [1,N]
+                    Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
+                    J_temp.push_back(J_entry);
+                    y_temp[count] = ito->wind_x;
+                    Eigen::Triplet<double> lambda_entry(count, count, 1.0/ito->var_xx);
+                    Lambda_temp.push_back(lambda_entry);
+                    count++;
 
-                // Lambda_uv = inv(Sigma_xy) = (1/det) * [var_yy, -cov_xy; -cov_xy, var_xx]
-                double L_xx = var_yy / det;
-                double L_yy = var_xx / det;
-                double L_xy = -cov_xy / det;
+                    // Wy range [N+1,2N]            
+                    Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
+                    J_temp.push_back(J_entry2);
+                    y_temp[count] = ito->wind_y;
+                    Eigen::Triplet<double> lambda_entry2(count, count, 1.0/ito->var_yy);
+                    Lambda_temp.push_back(lambda_entry2);
+                    count++;
+                }
+                else
+                {
+                    // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
+                    // we would need to introduce off-diagonal terms in Lambda.                    
 
-                // --- Update Triplets ---
+                    double var_xx = ito->var_xx;
+                    double var_yy = ito->var_yy;
+                    double cov_xy = ito->cov_xy;
+                    // 2. Invert 2x2 matrix to get Precision (Lambda)                
+                    double det = var_xx * var_yy - cov_xy * cov_xy;
+                    if (det < 1e-9) det = 1e-9; // Add small epsilon for numerical stability if r approx 0
 
-                // Row for w_x=Obs_x component
-                J_temp.push_back(Eigen::Triplet<double>(count, ito->cell_idx, 1));
-                y_temp[count] = ito->wind_x;
+                    // Lambda_uv = inv(Sigma_xy) = (1/det) * [var_yy, -cov_xy; -cov_xy, var_xx]
+                    double L_xx = var_yy / det;
+                    double L_yy = var_xx / det;
+                    double L_xy = -cov_xy / det;
 
-                // Row for w_y=Obs_y component
-                J_temp.push_back(Eigen::Triplet<double>(count + 1, ito->cell_idx + N, 1));
-                y_temp[count + 1] = ito->wind_y;
+                    // --- Update Triplets ---
 
-                // Fill the 2x2 Precision Block in Lambda
-                // This links row 'count' and 'count+1'
-                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count,     L_xx)); // diagonal x
-                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count + 1, L_yy)); // diagonal y
-                Lambda_temp.push_back(Eigen::Triplet<double>(count,     count + 1, L_xy)); // cross-term
-                Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count,     L_xy)); // cross-term (symmetric)
+                    // Row for w_x=Obs_x component
+                    J_temp.push_back(Eigen::Triplet<double>(count, ito->cell_idx, 1));
+                    y_temp[count] = ito->wind_x;
 
-                count += 2;
-            }
-        }
+                    // Row for w_y=Obs_y component
+                    J_temp.push_back(Eigen::Triplet<double>(count + 1, ito->cell_idx + N, 1));
+                    y_temp[count + 1] = ito->wind_y;
 
-        
-        // 5. Build Matrices (J, J', Lambda(A), H, G)
-        Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
-        Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
-        if (verbose)
-            std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
+                    // Fill the 2x2 Precision Block in Lambda
+                    // This links row 'count' and 'count+1'
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count,     count,     L_xx)); // diagonal x
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count + 1, L_yy)); // diagonal y
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count,     count + 1, L_xy)); // cross-term
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count,     L_xy)); // cross-term (symmetric)
 
-        Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
-        if (verbose)
-            std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
-
-        Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
-        Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
-        if (verbose)
-            std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")" << std::endl;
-
-        Hsparse.resize(2 * N, 2 * N);
-        Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
-        if (verbose)
-            std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
-
-        Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
-        if (verbose)
-            std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
-        
-        
-        //----------------------
-        // 6. SOLVE H * m = G
-        //----------------------
-        // Sanity check for NaNs or Infs in Hsparse before factorization
-        if (!Hsparse.coeffs().allFinite()) 
-        {
-            std::cerr << "=============================================================" << std::endl;
-            std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Hessian matrix contains NaNs or Infs." << "\033[0m" << std::endl;
-            std::cerr << "=============================================================" << std::endl;
-            return;
-        }
-
-        // DEBUG: NUMERICAL STABILITY CHECK
-        // ----------------------------------
-        if (false)
-        {
-            // Check the diagonal values of Hsparse to identify potential zero or near-zero entries that could indicate singularity or ill-conditioning.
-            std::cerr << "H max diag: " << Hsparse.diagonal().maxCoeff() << std::endl;
-            std::cerr << "H min diag: " << Hsparse.diagonal().minCoeff() << std::endl;
-            
-            Eigen::VectorXd diag = Hsparse.diagonal();
-            if (diag.size() != 2 * N) 
-            {
-                std::cerr << "Error de dimensiones: Diag " << diag.size() << " vs 2*N " << 2*N << std::endl;
-                return;
-            }
-            
-            int zero_count = 0;
-            for (int i = 0; i < diag.size(); ++i) {
-                if (std::abs(diag(i)) < 1e-12) {
-                    zero_count++;
-                    if (zero_count < 10) { // Solo imprimimos los primeros 10 para no colapsar
-                        int cell_idx = (i < N) ? i : i - N;
-                        const char* comp = (i < N) ? "Wx" : "Wy";
-                        std::cerr << "[GMRF] Nodo " << i << " (Celda " << cell_idx << " " << comp << ") es CERO." << std::endl;
-                    }
+                    count += 2;
                 }
             }
-            std::cerr << "[GMRF] Total de nodos sin restricciones: " << zero_count << " de " << diag.size() << std::endl;
 
-            // Add small value to diagonal for numerical stability (Tikhonov regularization)
-            double epsilon = 1e-6;
-            Hsparse.diagonal().array() += epsilon;
-        }
+            
+            // 5. Build Matrices (J, J', Lambda(A), H, G)
+            Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
+            Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
+            if (verbose)
+                std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
-        // Cholesky Factorization of Hessian (H = L * D * L')
-        solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
-        if (solver.info() != Eigen::Success)
+            Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
+            if (verbose)
+                std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
+
+            Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
+            Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
+            if (verbose)
+                std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")" << std::endl;
+
+            Hsparse.resize(2 * N, 2 * N);
+            Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
+            if (verbose)
+                std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
+
+            Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
+            if (verbose)
+                std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
+            
+            
+            //----------------------
+            // 6. SOLVE H * m = G
+            //----------------------
+            // Sanity check for NaNs or Infs in Hsparse before factorization
+            if (!Hsparse.coeffs().allFinite()) 
+            {
+                std::cerr << "=============================================================" << std::endl;
+                std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Hessian matrix contains NaNs or Infs." << "\033[0m" << std::endl;
+                std::cerr << "=============================================================" << std::endl;
+                return;
+            }
+
+            // DEBUG: NUMERICAL STABILITY CHECK
+            // ----------------------------------
+            if (false)
+            {
+                // Check the diagonal values of Hsparse to identify potential zero or near-zero entries that could indicate singularity or ill-conditioning.
+                std::cerr << "H max diag: " << Hsparse.diagonal().maxCoeff() << std::endl;
+                std::cerr << "H min diag: " << Hsparse.diagonal().minCoeff() << std::endl;
+                
+                Eigen::VectorXd diag = Hsparse.diagonal();
+                if (diag.size() != 2 * N) 
+                {
+                    std::cerr << "Error de dimensiones: Diag " << diag.size() << " vs 2*N " << 2*N << std::endl;
+                    return;
+                }
+                
+                int zero_count = 0;
+                for (int i = 0; i < diag.size(); ++i) {
+                    if (std::abs(diag(i)) < 1e-12) {
+                        zero_count++;
+                        if (zero_count < 10) { // Solo imprimimos los primeros 10 para no colapsar
+                            int cell_idx = (i < N) ? i : i - N;
+                            const char* comp = (i < N) ? "Wx" : "Wy";
+                            std::cerr << "[GMRF] Nodo " << i << " (Celda " << cell_idx << " " << comp << ") es CERO." << std::endl;
+                        }
+                    }
+                }
+                std::cerr << "[GMRF] Total de nodos sin restricciones: " << zero_count << " de " << diag.size() << std::endl;
+
+                // Add small value to diagonal for numerical stability (Tikhonov regularization)
+                double epsilon = 1e-6;
+                Hsparse.diagonal().array() += epsilon;
+            }
+
+            // Cholesky Factorization of Hessian (H = L * D * L')
+            solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
+            if (solver.info() != Eigen::Success)
+            {
+                // In red color for better visibility
+                std::cerr << "=============================================================" << std::endl;
+                std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Failed to compute Cholesky factorization of Hsparse. The system might be ill-conditioned or singular. MAP estimation cannot proceed." << "\033[0m" << std::endl;
+                std::cerr << "=============================================================" << std::endl;
+            
+                std::string ComputationInfo[4] = {"Success", "NumericalIssue", "NoConvergence", "InvalidInput"};
+                std::cerr << "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << std::endl;
+                return;
+            }
+
+            // Get MAP solution: m_MAP_sol = H^-1 * G
+            m_MAP_sol = solver.solve(G);
+            if (false)
+                std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
+                       
+            // 7. Update GMRF values from current iteration solution (MAP estimation)
+            for (size_t j = 0; j < m_map.size(); j++)
+            {
+                m_map[j].mean = m_MAP_sol(j);   // Can be iterative (if advection prior is used)
+                m_map[j].var = 0.0;             // Not estimated yet.
+                m_map[j].covariance = 0.0;      // Not estimated yet.
+            }
+
+            // 8. Residual Vector (r = J*m - y)
+            residual = Jsparse * m_MAP_sol - y_temp;
+            // Calculate the norm of the residual with the Asparse weights: sqrt(r' * A * r)
+            double weighted_residual_norm = sqrt(residual.transpose() * Asparse * residual);
+
+            if (verbose)
+                std::cerr << "[GMRF] MAP estimated --> Picard iteration: " << iter+1 << ". Weighted residual norm: " << weighted_residual_norm << std::endl;
+            
+            // Check convergence based on relative change in weighted residual norm
+            double rel_change = std::abs(prev_weighted_residual_norm - weighted_residual_norm) / prev_weighted_residual_norm;
+            if (rel_change < 1e-3) {
+                if (verbose) std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
+                break;
+            }
+            prev_weighted_residual_norm = weighted_residual_norm;
+
+        }   //end of Picard iterations
+
+        if (estimateTiming)
         {
-            // In red color for better visibility
-            std::cerr << "=============================================================" << std::endl;
-            std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Failed to compute Cholesky factorization of Hsparse. The system might be ill-conditioned or singular. MAP estimation cannot proceed." << "\033[0m" << std::endl;
-            std::cerr << "=============================================================" << std::endl;
-           
-            std::string ComputationInfo[4] = {"Success", "NumericalIssue", "NoConvergence", "InvalidInput"};
-            std::cerr << "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << std::endl;
-            return;
-        }
-
-        // Get MAP solution: m_MAP_sol = H^-1 * G
-        m_MAP_sol = solver.solve(G);
-        if (false)
-            std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
-
-        if (estimateTiming){
             meanTimer.stop(); // Stop Timer for Mean computation
             auto mean_time_ms = meanTimer.getMeanTimeMs();
-            std::cerr << "[GMRF] Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
+            std::cerr << "[GMRF] MAP Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
         }
-        
-        // 7. Update GMRF values from current solution
-        for (size_t j = 0; j < m_map.size(); j++)
-        {
-            m_map[j].mean = m_MAP_sol(j);   // Not iterative! no need to increment previous state
-            m_map[j].var = 0.0;             // Not estimated yet.
-            m_map[j].covariance = 0.0;      // Not estimated yet.
-        }
-
-        // Calculate the final residual vector (r = J*m - y)
-        residual = Jsparse * m_MAP_sol - y_temp;
-        // Calculate the norm of the residual with the Asparse weights: sqrt(r' * A * r)
-        double weighted_residual_norm = sqrt(residual.transpose() * Asparse * residual);
-        std::cerr << "[GMRF] MAP estimated with residual norm " << residual.norm() << " (weighted: " << weighted_residual_norm << ")" << std::endl;
     }
     catch (std::exception e)
     {

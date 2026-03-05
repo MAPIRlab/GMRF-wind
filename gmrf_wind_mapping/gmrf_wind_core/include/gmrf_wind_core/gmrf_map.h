@@ -126,7 +126,7 @@ public:
     void read_lambdas(double &m_lambdaPrior_adv, double &m_lambdaPrior_mass, double &m_lambdaPrior_diff, double &m_lambdaPrior_vorticity, double &m_lambdaPrior_obstacles);
    
     // GMRF Estimation
-    void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
+    void MAP_estimation_GMRF(int m_picard_iterations = 1);         // Solves the Least Squares linear system (MAP estimator)
     void computeUncertainty_GMRF();
 
     // Read estimation
@@ -178,7 +178,6 @@ protected:
     double lambdaPrior_diffusion;        // Weight for difussion prior (wind in a cell should be similar to its neighbors in all directions, also regularization)
     double lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
-    int m_picard_iterations = 3;          // Threshold/count for Picard Method
     std::vector<int> m_cells_to_obs;      // Distance in cells to the closest obstacle
     
     struct TobservationGMRF
