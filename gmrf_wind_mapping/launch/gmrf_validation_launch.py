@@ -31,12 +31,12 @@ def launch_setup(context, *args, **kwargs):
             # Lambda weights for the different priors & Obs in the GMRF model
             {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
             {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
-            {"GMRF_lambdaPrior_advection": 10.0},            # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
-            {"GMRF_lambdaPrior_mass_conservation": 10.0},    # Mass conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_advection": 100.0},             # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
+            {"GMRF_lambdaPrior_mass_conservation": 1000.0},    # Mass conservation law -> divergence of the wind field is zero
             {"GMRF_lambdaPrior_diffusion": 0.0001},            # Diffusion constraint -> neighboring cells should have similar wind values in all directions
-            {"GMRF_lambdaPrior_vorticity": 0.0001},            # Vorticity constraint -> curl of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 1000.0},            # Obstacles --> cells close to obstacles has only tangencial wind
-            {"num_iterations_MAP": 10},                         # Maximum number of iterations for the MAP estimation optimization
+            {"GMRF_lambdaPrior_vorticity": 0.0},               # Vorticity constraint -> curl of the wind field is zero
+            {"GMRF_lambdaPrior_obstacles": 2000.0},            # Obstacles --> cells close to obstacles has only tangencial wind
+            {"num_iterations_MAP": 10},                        # Maximum number of iterations for the MAP estimation optimization
             {"experiment_number": 3},                          # 1: Full Optimization, 2: Fixed lambdas, 3: Manual Tunning
         ]
     )
