@@ -46,6 +46,7 @@ Cvalgt::Cvalgt()
     GMRF_lambdaPrior_diffusion = declare_parameter<double>("GMRF_lambdaPrior_diffusion", 1.0);
     GMRF_lambdaPrior_vorticity = declare_parameter<double>("GMRF_lambdaPrior_vorticity", 1.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 1.0);
+    num_iterations_MAP = declare_parameter<int>("num_iterations_MAP", 100);
 
     // Experiment
     experiment_number = declare_parameter<int>("experiment_number", 0);
@@ -466,7 +467,7 @@ void Cvalgt::publishMaps()
 void Cvalgt::update()
 {
     // MAP estimation (with current lambdas)
-    gmrf_map->MAP_estimation_GMRF();
+    gmrf_map->MAP_estimation_GMRF(num_iterations_MAP);
 
     // Estimate uncertainty on final MAP estimation
     gmrf_map->computeUncertainty_GMRF();
@@ -486,7 +487,7 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
         if (N != N2)
         {
             RCLCPP_ERROR(get_logger(), "[gmrf-validation] ERROR: GMRF map size and GT map size do not match!");
-            return {0.0, 0.0, 0.0};
+            return {0.0, 0.0, 0.0, 0.0};
         }
 
         using visualization_msgs::msg::Marker;
@@ -1085,13 +1086,10 @@ int main(int argc, char** argv)
         my_gmrf_map->SimulateFixedWindObservations();
         //my_gmrf_map->SimulateWindObservations(50);
 
-        // Perform MAP + Uncertainty estimation (twice to apply anisotropic regularization based on the first estimation)
+        // Perform MAP + Uncertainty estimation
         my_gmrf_map->update();
-        std::string file_name = "gmrf_estimation_pass1.csv";
-        my_gmrf_map->saveGMRFEstimationToCSV(file_name);
-
-        my_gmrf_map->update();
-        file_name = "gmrf_estimation_pass2.csv";
+        // Save file with num_iterations and lambda values
+        std::string file_name = "gmrf_estimation_" + std::to_string(my_gmrf_map->num_iterations_MAP) + "_iters.csv";
         my_gmrf_map->saveGMRFEstimationToCSV(file_name);
 
         break;

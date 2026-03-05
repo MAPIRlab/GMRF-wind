@@ -66,7 +66,7 @@ public:
                                 );
         
         // 2. Run MAP estimation and uncertainty computation
-        gmrf_map->MAP_estimation_GMRF();
+        gmrf_map->MAP_estimation_GMRF(num_iterations_MAP);
         gmrf_map->computeUncertainty_GMRF();
 
         // 3. Compute performance metrics (AAE, RMSE, ANSP, NLPD)
@@ -110,6 +110,7 @@ public:
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind    
     double observation_var_wind_speed;         // Variance of the wind speed measurement (m/s)^2
     double observation_var_wind_direction;     // Variance of the wind direction measurement (rad)^2
+    int num_iterations_MAP;                 // Maximum number of iterations for the MAP estimation optimization
     int experiment_number;                     // Number of the experiment to run
     
     // Variables
