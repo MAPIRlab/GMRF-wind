@@ -12,7 +12,8 @@ import os
 from pyrsistent import ny
 
 # Configuration
-csv_files = ("gmrf_estimation_pass1.csv", "gmrf_estimation_pass2.csv")
+#csv_files = ("gmrf_estimation_1_iters.csv", "gmrf_estimation_2_iters.csv", "gmrf_estimation_10_iters.csv", "gmrf_estimation_100_iters.csv", "gmrf_estimation_1000_iters.csv")
+csv_files = ("gmrf_estimation_100_iters.csv",)
 
 
 def cartesian_to_polar_with_uncertainty(df):
