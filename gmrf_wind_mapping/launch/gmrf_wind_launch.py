@@ -32,11 +32,13 @@ def launch_setup(context, *args, **kwargs):
             {"verbose": False},                               # Verbose mode for debugging
             {"visualize_gmrf": True},                         # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"GMRF_lambdaPrior_reg": 1.0},                    # Regularization -> neighbour cells have similar wind vectors
-            {"GMRF_lambdaPrior_flux_conservation": 1.0},      # Flux conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 1.0},              # Obstacles --> cells close to obstacles has only tangencial wind
-            {"GMRF_lambdaObs": 1.0},                          # The initial weight (Lambda) of each observation
-            {"GMRF_lambdaObsLoss": 0.0}                       # The loss of information (Lambda) of the observations with each iteration
+            {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
+            {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
+            {"GMRF_lambdaPrior_advection": 10.0},              # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
+            {"GMRF_lambdaPrior_mass_conservation": 10.0},      # Mass conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
+            {"GMRF_lambdaPrior_vorticity": 1.0},               # Vorticity constraint -> curl of the wind field is zero
+            {"GMRF_lambdaPrior_obstacles": 1.0},               # Obstacles --> cells close to obstacles has only tangencial wind
         ]
     )
 

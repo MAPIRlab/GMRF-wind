@@ -45,10 +45,11 @@ Cgmrf::Cgmrf()
     visualize_gmrf = declare_parameter<bool>("visualize_gmrf", true);
 
     // Lambda/weights for the different priors
+    GMRF_lambdaPrior_advection = declare_parameter<double>("GMRF_lambdaPrior_advection", 100.0);
     GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 100.0);
+    GMRF_lambdaPrior_diffusion = declare_parameter<double>("GMRF_lambdaPrior_diffusion", 100.0);
     GMRF_lambdaPrior_vorticity = declare_parameter<double>("GMRF_lambdaPrior_vorticity", 100.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10.0);
-    GMRF_lambdaPrior_reg = declare_parameter<double>("GMRF_lambdaPrior_reg", 0.1);
 
     // Observation variances (Gaussian likelihood)
     observation_var_wind_speed = declare_parameter<double>("observation_var_wind_speed", 0.0001);           // Variance of the wind speed measurement (m/s)^2
@@ -181,17 +182,19 @@ void Cgmrf::initialize()
     
     // Create the GMRF-Map and initialize its Prior Factors
     // Set only factors with a Lambda_prior > 0, (avoids adding unnecessary factors to the graph)
-    bool factor_select[4] = {GMRF_lambdaPrior_mass_conservation > 0, 
+    bool factor_select[5] = {GMRF_lambdaPrior_advection > 0,
+                            GMRF_lambdaPrior_mass_conservation > 0, 
+                            GMRF_lambdaPrior_diffusion > 0,
                             GMRF_lambdaPrior_vorticity > 0, 
-                            GMRF_lambdaPrior_obstacles > 0, 
-                            GMRF_lambdaPrior_reg > 0};
+                            GMRF_lambdaPrior_obstacles > 0,
+                            };
     my_map = std::make_unique<CGMRF_map>(occMap, 
                                         cell_size,
                                         factor_select,
                                         verbose,
                                         true // estimateTiming
                                         );
-    my_map->update_lambdas(GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles, GMRF_lambdaPrior_reg);
+    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles);
     RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
 
@@ -302,11 +305,12 @@ void Cgmrf::publishMaps()
 void Cgmrf::update()
 {
     // Update Lambda parameters (from parameter server)
+    GMRF_lambdaPrior_advection = get_parameter("GMRF_lambdaPrior_advection").as_double();
     GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+    GMRF_lambdaPrior_diffusion = get_parameter("GMRF_lambdaPrior_diffusion").as_double();
     GMRF_lambdaPrior_vorticity = get_parameter("GMRF_lambdaPrior_vorticity").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
-    GMRF_lambdaPrior_reg = get_parameter("GMRF_lambdaPrior_reg").as_double();
-    my_map->update_lambdas(GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles, GMRF_lambdaPrior_reg);
+    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles);
 
     // Update GMRF estimation
      my_map->MAP_estimation_GMRF();

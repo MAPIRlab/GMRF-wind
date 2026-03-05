@@ -31,10 +31,11 @@ def launch_setup(context, *args, **kwargs):
             # Lambda weights for the different priors & Obs in the GMRF model
             {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
             {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
+            {"GMRF_lambdaPrior_advection": 10.0},              # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
             {"GMRF_lambdaPrior_mass_conservation": 10.0},      # Mass conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_vorticity": 0.0},               # Vorticity constraint -> curl of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 0.0},               # Obstacles --> cells close to obstacles has only tangencial wind
-            {"GMRF_lambdaPrior_regularization": 50.0},          # Regularization (Tikhonov) -> neighboring cells should have similar wind values
+            {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
+            {"GMRF_lambdaPrior_vorticity": 1.0},               # Vorticity constraint -> curl of the wind field is zero
+            {"GMRF_lambdaPrior_obstacles": 1.0},               # Obstacles --> cells close to obstacles has only tangencial wind
             {"experiment_number": 2},                          # 1: Full Optimization, 2: Fixed lambdas.
         ]
     )

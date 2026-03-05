@@ -15,7 +15,6 @@
 #include <chrono>   // Needed for time measurements
 
 // Data structure for each cell in the GMRF
-// Stores mean and standard deviation, as we build a "Gaussian" Random Field
 struct TRandomFieldCell
 {
     double mean; 
@@ -28,8 +27,8 @@ struct TOccupancyMap
 {
     std::vector<int8_t> data;
     double resolution;      // cell size (m)
-    size_t width;        // number of cells in X direction
-    size_t height;       // number of cells in Y direction
+    size_t width;           // number of cells in X direction
+    size_t height;          // number of cells in Y direction
     // Real-world pose of the cell (0,0) in the map ref system
     double origin_x;        // world coordinates of the origin of the map
     double origin_y;        // world coordinates of the origin of the map
@@ -85,31 +84,36 @@ struct TimeStats {
 
 // Enum for the Factor Types
 enum class FactorType {
+    Advection,
+    AdvectionHoriz,
+    AdvectionVert,
+    AdvectionDiag1,    // +45 deg
+    AdvectionDiag2,    // 135 deg
     MassConservation,
+    Diffusion,
     Vorticity,
     Obstacle,
     Observation,
-    Regularization,
-    RegularizationHoriz,
-    RegularizationVert,
-    RegularizationDiag1,    // +45 deg
-    RegularizationDiag2     // 135 deg
+    //Regularization,
+    //RegularizationHoriz,
+    //RegularizationVert,
+    //RegularizationDiag1,    // +45 deg
+    //RegularizationDiag2     // 135 deg
 };
 
 struct FactorInfo {
-    size_t row_idx;    // El 'count' que identifica la fila en J y Lambda
-    FactorType type;   // Tipo de factor (MassConservation, Vorticity, etc.)
-    size_t cell_idx;   // El índice 'j' de la celda central asociada al factor
+    size_t row_idx;    // The 'count' to identify the row in J and Lambda
+    FactorType type;   // Type of factor (MassConservation, Vorticity, etc.)
+    size_t cell_idx;   // The 'j' index of the central cell associated with the factor
 };
 
 class CGMRF_map
 {
 public:
     // Create GMRF from an occupancy gridmap
-    // And sets the prior weights for the different factors
     CGMRF_map(const TOccupancyMap& oc_map, 
                     float cell_size,
-                    bool factor_select[4],
+                    bool factor_select[5],
                     bool verbose,
                     bool estimateTiming);
     ~CGMRF_map();
@@ -118,8 +122,8 @@ public:
     void insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
     void clearObservations_GMRF();
     void getObservationsIdx(std::vector<int>& obs_idx);
-    void update_lambdas(double m_lambdaPrior_mass, double m_lambdaPrior_vorticity, double m_lambdaPrior_obstacles, double m_lambdaPrior_reg);
-    void read_lambdas(double &m_lambdaPrior_mass, double &m_lambdaPrior_vorticity, double &m_lambdaPrior_obstacles, double &m_lambdaPrior_reg);
+    void update_lambdas(double m_lambdaPrior_adv, double m_lambdaPrior_mass, double m_lambdaPrior_diff, double m_lambdaPrior_vorticity, double m_lambdaPrior_obstacles);
+    void read_lambdas(double &m_lambdaPrior_adv, double &m_lambdaPrior_mass, double &m_lambdaPrior_diff, double &m_lambdaPrior_vorticity, double &m_lambdaPrior_obstacles);
    
     // GMRF Estimation
     void MAP_estimation_GMRF();         // Solves the Least Squares linear system (MAP estimator)
@@ -168,11 +172,13 @@ protected:
     size_t nObsFactors;                   // Dynamic factors due to new observations
     size_t nFactors;                      // Total num of factors
     bool verbose;
-    bool factor_select[4];                // Whether to set or not the factors of each type (mass conservation, vorticity, obstacles, regularization)
+    bool factor_select[5];                // Whether to set or not the factors of each type (mass conservation, vorticity, obstacles, regularization, advection)
+    double lambdaPrior_advection;         // Weight for advection prior (wind in a cell should be similar to its neighbors in the direction of the wind, this is dynamic as it depends on the current estimation of the wind direction)
     double lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
+    double lambdaPrior_diffusion;        // Weight for difussion prior (wind in a cell should be similar to its neighbors in all directions, also regularization)
     double lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
     double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
-    double lambdaPrior_reg;               // Weight for regularization prior (should be very small)
+    int m_picard_iterations = 3;          // Threshold/count for Picard Method
     std::vector<int> m_cells_to_obs;      // Distance in cells to the closest obstacle
     
     struct TobservationGMRF

@@ -10,16 +10,17 @@
   ---------------------------------------------------------------*/
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                     float cell_size,
-                    bool factor_select[4],      // Whether to set or not the factors of each type (mass conservation, vorticity, obstacles, regularization)
+                    bool factor_select[5],      // Factor Selector (Advection, MassCnservation, Diffusion, Vorticity and Obstacles)
                     bool verbose,
                     bool estimateTiming=false)
 {
-    // Set Params
-    this->verbose = verbose;
+    // Set Params    
     this->factor_select[0] = factor_select[0];
     this->factor_select[1] = factor_select[1];
     this->factor_select[2] = factor_select[2];
     this->factor_select[3] = factor_select[3];
+    this->factor_select[4] = factor_select[4];
+    this->verbose = verbose;
     this->estimateTiming = estimateTiming;
 
     try
@@ -28,6 +29,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
         m_resolution = cell_size; // Desired resolution to build the GMRF (m)
         
+        //---------------------------------------
+        // 0. Set GMRF Dimensions and Parameters
+        //---------------------------------------
         // Set initial GMRF dimensions as the OccupancyMap (in meters)
         double x_min = oc_map.origin_x;
         double x_max = oc_map.origin_x + oc_map.width * oc_map.resolution;
@@ -48,7 +52,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         std::cerr << "[GMRF_MAP] Generating GMRF for 2D WIND estimation..." << std::endl;
 
         //---------------------------------------
-        // 1. Init the map container (2N cells)
+        // 1. Init the m_map container (2N cells)
         //---------------------------------------
         TRandomFieldCell init_cell;
         init_cell.mean = 0.0;
@@ -98,17 +102,10 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
         factor_types.clear();
        
-        //----------------------------------------------------------
-        // 3. Build Prior Factors (just once if the map is static)
-        //----------------------------------------------------------
-        // Given the possibility of using different cell_sizes for the GMRF 
-        // and the provided OccupancyGrid map, we need to employ the OccupancyGrid
-        // map to determine the real interconnections between cells and then 
-        // create the factors between nodes in the GMRF.
-        
-        // Parameters:
+        //-------------------------
+        // 3. Prior Factors
+        //-------------------------
         size_t count = 0;
-        int reg_order = 1;                  // 0: L1 regularization (wind=0); 1: L2 regularization(penalizes differences)
         int num_neighbors = 8;              // Whether to consider 4 or 8 neighbors when setting factors.
         
         for (size_t j = 0; j < N; j++)
@@ -117,11 +114,88 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             size_t jx, jy;
             id2cellxy(j, jx, jy);
 
+
+            if (!is_cell_free(j))
+            {
+                // Force Wind estimation to be 0 (Damping) for numericall stability
+                {
+                    // Wx(j) = 0
+                    J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                    factor_types.push_back({count, FactorType::Diffusion, j});
+                    count++;
+
+                    // Wy(j) = 0
+                    J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                    factor_types.push_back({count, FactorType::Diffusion, j});
+                    count++;
+                }
+            }
+
+            // --------------------------------
+            // ---   3.0 ADVECTION PRIOR    ---
+            // --------------------------------            
+             if (factor_select[0])
+             {
+                // Wind in a cell should be similar to its neighbors in the direction of the wind. 
+                // This is a dynamic prior, so the weight (lambda) will depend on the current estimation 
+                // of the wind direction and will be updated at each iteration.
+                struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
+                std::vector<RegNeighbor> reg_nbs= {
+                    {1, 0, FactorType::AdvectionHoriz, false},  // E
+                    {0, 1, FactorType::AdvectionVert,  false}   // N
+                };
+
+                if (num_neighbors == 8)
+                {
+                    // Consider also diagonals
+                    reg_nbs.push_back({1, 1, FactorType::AdvectionDiag1, true});    // NE
+                    reg_nbs.push_back({-1, 1, FactorType::AdvectionDiag2, true});   // NW
+                }
+                
+                for (const auto& nb : reg_nbs) 
+                {
+                    int nx = (int)jx + nb.dx;
+                    int ny = (int)jy + nb.dy;
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
+                    
+                    // Neighbor idx
+                    size_t nj = cellxy2id(nx, ny);
+
+                    // Only if BOTH cells are free
+                    if (is_cell_free(j) &&is_cell_free(nj)) 
+                    {
+                        bool can_connect = true;
+                        // If diagonal, check the "elbow" cells to avoid advection through corners
+                        if (nb.is_diag) 
+                        {
+                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
+                                can_connect = false;
+                            }
+                        }
+
+                        if (can_connect) 
+                        {
+                            // Link Wx
+                            J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                            J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
+                            factor_types.push_back({count, nb.type, j});
+                            count++;
+                            // Link Wy
+                            J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                            J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
+                            factor_types.push_back({count, nb.type, j});
+                            count++;
+                        }
+                    }
+                }
+            }
+
+
             // --------------------------------
             // --- 3.1 MASS CONSERVATION    ---
             // --------------------------------
             // Eight Neighbor based Divergence free field constraint
-            if (factor_select[0] && is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
+            if (factor_select[1] && is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
             {
                 // As soon as any of its 8 clossest neighbour cells is free, set the factor
                 bool set_divergence_free = false;
@@ -195,12 +269,71 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 }
             }
 
+            // --------------------------------
+            // ---  3.2  VISCOUS DIFFUSION  ---
+            // --------------------------------
+            if (factor_select[2])
+            {       
+                // Tikhonov (L2) regularization: smoothness prior. Force neighboring cells to have similar wind values
+                struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
+                std::vector<RegNeighbor> reg_nbs= {
+                    {1, 0, FactorType::Diffusion, false},  // E
+                    {0, 1, FactorType::Diffusion,  false}   // N
+                };
+                /*
+                if (num_neighbors == 8)
+                {
+                    // Consider also diagonals
+                    reg_nbs.push_back({1, 1, FactorType::Diffusion, true});    // NE
+                    reg_nbs.push_back({-1, 1, FactorType::Diffusion, true});   // NW
+                }
+                */
+                
+                for (const auto& nb : reg_nbs) 
+                {
+                    int nx = (int)jx + nb.dx;
+                    int ny = (int)jy + nb.dy;
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
+                    
+                    // neighbor idx
+                    size_t nj = cellxy2id(nx, ny);
+
+                    // Only regularize if BOTH cells are free
+                    if (is_cell_free(j) &&is_cell_free(nj)) 
+                    {
+                        bool can_connect = true;
+                        // If diagonal, check the "elbow" cells to avoid smoothing through corners
+                        if (nb.is_diag) 
+                        {
+                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
+                                can_connect = false;
+                            }
+                        }
+
+                        if (can_connect) 
+                        {
+                            // Smooth Wx
+                            J.push_back(Eigen::Triplet<double>(count, j, 1.0));
+                            J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
+                            factor_types.push_back({count, nb.type, j});
+                            count++;
+                            // Smooth Wy
+                            J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
+                            J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
+                            factor_types.push_back({count, nb.type, j});
+                            count++;
+                        }
+                    }
+                }
+            }
+
+
             // -----------------------------------
-            // --- 3.2 VORTICITY               ---
+            // --- 3.3 VORTICITY               ---
             // -----------------------------------
             // Implementation of: dWy/dx - dWx/dy = 0 Irrotational field constraint
             // Controls the vorticity of the field, that is, it forces to some extent the wind to not have vortices and swirls.
-            if (factor_select[1])
+            if (factor_select[3])
             {
                 if(num_neighbors == 4)
                 {
@@ -275,13 +408,14 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
 
 
             // ----------------------
-            // --- 3.3 OBSTACLES  ---
-            // ----------------------
-            // Goal: Force wind to zero at boundaries to prevent "bleeding" into walls.
-            int dx_card[] = {1, 0};  // E, N
-            int dy_card[] = {0, 1};  // E, N
-            if (factor_select[2])
+            // --- 3.4 OBSTACLES  ---
+            // ----------------------            
+            if (factor_select[4])
             {
+                // Goal: Force wind to zero at boundaries to prevent "bleeding" into walls.
+                int dx_card[] = {1, 0};  // E, N
+                int dy_card[] = {0, 1};  // E, N
+
                 // Only consider E and N neighbors (never diagonals)
                 for (int i = 0; i < 2; i++) 
                 {
@@ -333,80 +467,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 }
             }
             
-            // -----------------------------
-            // ---  3.4  REGULARIZATION  ---
-            // -----------------------------
-            if (factor_select[3])
-            {
-                if (reg_order == 0 || !is_cell_free(j))
-                {
-                    // L1 regularization: Force Wind estimation to be 0 (Damping)
-                    {
-                        // Regularization for Wx: Wx(j) = 0
-                        J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                        factor_types.push_back({count, FactorType::Regularization, j});
-                        count++;
-
-                        // Regularization for Wy: Wy(j) = 0
-                        J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                        factor_types.push_back({count, FactorType::Regularization, j});
-                        count++;
-                    }
-                }                
-                else if (reg_order == 1)
-                {
-                    // Tikhonov (L2) regularization: smoothness prior. Force neighboring cells to have similar wind values (Wx and Wy independently).
-                    struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
-                    std::vector<RegNeighbor> reg_nbs= {
-                        {1, 0, FactorType::RegularizationHoriz, false},  // E
-                        {0, 1, FactorType::RegularizationVert,  false}   // N
-                    };
-
-                    if (num_neighbors == 8)
-                    {
-                        // Consider also diagonals
-                        reg_nbs.push_back({1, 1, FactorType::RegularizationDiag1, true});    // NE
-                        reg_nbs.push_back({-1, 1, FactorType::RegularizationDiag2, true});   // NW
-                    }
-                    
-                    for (const auto& nb : reg_nbs) 
-                    {
-                        int nx = (int)jx + nb.dx;
-                        int ny = (int)jy + nb.dy;
-                        if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
-                        
-                        // neighbor idx
-                        size_t nj = cellxy2id(nx, ny);
-
-                        // Only regularize if BOTH cells are free
-                        if (is_cell_free(j) &&is_cell_free(nj)) 
-                        {
-                            bool can_connect = true;
-                            // If diagonal, check the "elbow" cells to avoid smoothing through corners
-                            if (nb.is_diag) 
-                            {
-                                if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
-                                    can_connect = false;
-                                }
-                            }
-
-                            if (can_connect) 
-                            {
-                                // Smooth Wx
-                                J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                                J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
-                                factor_types.push_back({count, nb.type, j});
-                                count++;
-                                // Smooth Wy
-                                J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                                J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
-                                factor_types.push_back({count, nb.type, j});
-                                count++;
-                            }
-                        }
-                    }
-                }
-            }
+            
         } // end for setting factors
 
 
@@ -445,27 +506,33 @@ CGMRF_map::~CGMRF_map()
 }
 
 
-void CGMRF_map::update_lambdas(double m_lambdaPrior_mass,
+void CGMRF_map::update_lambdas(double m_lambdaPrior_adv,
+                        double m_lambdaPrior_mass,
+                        double m_lambdaPrior_diff,
                         double m_lambdaPrior_vorticity, 
-                        double m_lambdaPrior_obstacles,
-                        double m_lambdaPrior_reg)
+                        double m_lambdaPrior_obstacles
+                        )
 {
     // Update internal precision parameters
+    lambdaPrior_advection = m_lambdaPrior_adv;
     lambdaPrior_mass_conservation = m_lambdaPrior_mass;
+    lambdaPrior_diffusion = m_lambdaPrior_diff;
     lambdaPrior_vorticity = m_lambdaPrior_vorticity;
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
-    lambdaPrior_reg = m_lambdaPrior_reg;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_mass, 
+void CGMRF_map::read_lambdas(double &m_lambdaPrior_adv,
+                        double &m_lambdaPrior_mass,
+                        double &m_lambdaPrior_diff, 
                         double &m_lambdaPrior_vorticity, 
-                        double &m_lambdaPrior_obstacles, 
-                        double &m_lambdaPrior_reg)
+                        double &m_lambdaPrior_obstacles
+                        )
 {
+    m_lambdaPrior_adv = lambdaPrior_advection;
     m_lambdaPrior_mass = lambdaPrior_mass_conservation;
+    m_lambdaPrior_diff = lambdaPrior_diffusion;
     m_lambdaPrior_vorticity = lambdaPrior_vorticity;
     m_lambdaPrior_obstacles = lambdaPrior_obstacles;
-    m_lambdaPrior_reg = lambdaPrior_reg;
 }
 
 /*---------------------------------------------------------------
@@ -693,8 +760,8 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 
 
 /**
- * @brief Calculates the dynamic weight (Lambda) for a specific factor.
- * @param type The type of the factor (Regularization direction, Obstacle, etc.)
+ * @brief Calculates the weight (Lambda) for a specific factor.
+ * @param type The type of the factor (Advection, MassConservation, Vorticity, Obstacle, Regularization, etc.)
  * @param cell_idx The index of the primary cell associated with the factor.
  * @param ux Previous estimation of the X-component of the wind at cell_idx.
  * @param uy Previous estimation of the Y-component of the wind at cell_idx.
@@ -703,48 +770,44 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const
 {
     // 1. Handle cases where a previous wind estimation is not available (Step 1)
-    // or magnitude is too low to determine a sensitive direction --> isotropic regularization.
+    // or magnitude is too low to determine a sensitive direction --> isotropic
     double mag_sq = ux * ux + uy * uy;
     double mag = std::sqrt(mag_sq);
-    double magnitude_softening = 1.0 / (1.0 + mag);     // wind speed dependent
-    double effective_lambda_reg = lambdaPrior_reg * magnitude_softening;
+    double theta = atan2(uy, ux); // Current wind angle in radians
 
     bool has_valid_direction = !std::isnan(ux) && !std::isnan(uy) && mag_sq > 1e-6;
-
-    // Hyperparameter: Ratio of smoothing perpendicular to flow vs. along flow.
-    // 1.0 = Isotropic (Standard), 0.1 = Highly Anisotropic (Preserves sharp edges).
-    const double alpha = 0.01;
-    const double alpha_base = 0.05; 
-    double dynamic_alpha = alpha_base / (1.0 + mag);
-  
-
 
     // Helper to calculate anisotropic weight based on alignment with a unit vector (cos, sin)
     auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal) 
     {
         if (!has_valid_direction) {
-            // Default to isotropic if no wind info is available.
-            // Diagonals are scaled by 0.5 due to distance (1/sqrt(2))^2.
-            return effective_lambda_reg * (is_diagonal ? 0.5 : 1.0);
+            return 0.001; // Low wind: negligible advection
         }
 
         // Project wind vector onto the connection axis: (W · Axis) / |W|
         // We square the result to get the "alignment" factor [0, 1]
         double dot_product = (ux * axis_x + uy * axis_y);
-        double alignment = (dot_product * dot_product) / mag_sq;
-
-        // Final Weight: High alignment -> lambda_reg, Low alignment -> lambda_reg * alpha
-        //double weight = lambdaPrior_reg * (alignment + (1.0 - alignment) * alpha);
-        double weight = effective_lambda_reg * (alignment + (1.0 - alignment) * dynamic_alpha);
+        double alignment = std::abs(dot_product) / mag; // Cosine of the angle between wind and axis (absolute value)
+        
+        double weight = lambdaPrior_advection * alignment * alignment; // Square to emphasize strong alignments and de-emphasize weak ones
 
         // Scale by distance squared for diagonals
-        return is_diagonal ? weight * 0.5 : weight;
+        return std::max(weight, 0.001); // Ensure a minimum weight to prevent complete disconnection (numerical stability)
     };
 
     switch (type) 
     {
-        case FactorType::MassConservation: return lambdaPrior_mass_conservation;
-        case FactorType::Vorticity: 
+        case FactorType::AdvectionHoriz:
+            return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
+        case FactorType::AdvectionVert:
+            return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
+        case FactorType::AdvectionDiag1:
+            return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
+        case FactorType::AdvectionDiag2:
+            return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
+        case FactorType::MassConservation: 
+            return lambdaPrior_mass_conservation;
+        case FactorType::Vorticity:
         {
             // Use the distance transform to allow more "turbulence" near obstacles
             // and force "a bit more" laminar flow in open areas.
@@ -753,18 +816,10 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
             double sigmoid_weight = 1.0 / (1.0 + std::exp(-5.0 * (cell_steps - d_laminar)));
             return lambdaPrior_vorticity * sigmoid_weight;
         }
-        case FactorType::Obstacle: return lambdaPrior_obstacles;
-        case FactorType::Regularization: return lambdaPrior_reg; // Isotropic regularization (default)
-        // --- Anisotropic Regularization ---
-        case FactorType::RegularizationHoriz:
-            return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
-        case FactorType::RegularizationVert:
-            return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
-        case FactorType::RegularizationDiag1:
-            return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
-        case FactorType::RegularizationDiag2:
-            return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
-        
+        case FactorType::Diffusion: 
+            return lambdaPrior_diffusion; // Isotropic regularization
+        case FactorType::Obstacle: 
+            return lambdaPrior_obstacles;
         default: 
         {
             std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
