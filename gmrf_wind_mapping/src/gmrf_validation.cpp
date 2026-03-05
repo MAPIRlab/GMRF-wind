@@ -1130,6 +1130,33 @@ int main(int argc, char** argv)
         break;
         */
     }
+    case 3:
+    {
+        // Manual tunning of lambda parameters (dynamic reconfigure)
+        
+        // a) Simulate N noisy random observations (wont change during the test)
+        my_gmrf_map->SimulateFixedWindObservations();
+        //my_gmrf_map->SimulateWindObservations(50);
+        
+        while (rclcpp::ok())
+        {
+            // Update Lambda values (from parameter server)
+            double lambda_advection = my_gmrf_map->get_parameter("GMRF_lambdaPrior_advection").as_double();
+            double lambda_mass_conservation = my_gmrf_map->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+            double lambda_diffusion = my_gmrf_map->get_parameter("GMRF_lambdaPrior_diffusion").as_double();
+            double lambda_vorticity = my_gmrf_map->get_parameter("GMRF_lambdaPrior_vorticity").as_double();
+            double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+            my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_vorticity, lambda_obstacles);
+
+            // Estimate MAP
+            my_gmrf_map->update();
+            my_gmrf_map->publishMaps();
+
+            rclcpp::spin_some(my_gmrf_map);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        break;
+    }
     default:
         break;
     }
