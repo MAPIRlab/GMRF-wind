@@ -872,7 +872,7 @@ void CGMRF_map::computeDistanceTransform()
             // Check bounds
             if (nx >= 0 && nx < (int)m_size_x && ny >= 0 && ny < (int)m_size_y) 
             {
-                size_t next_idx = xy2idx(nx, ny);
+                size_t next_idx = cellxy2id(nx, ny);
                 if (m_cells_to_obs[next_idx] == std::numeric_limits<int>::max()) 
                 {
                     m_cells_to_obs[next_idx] = m_cells_to_obs[curr_idx] + 1;
