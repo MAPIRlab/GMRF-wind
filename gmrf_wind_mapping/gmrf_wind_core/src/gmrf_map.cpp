@@ -10,7 +10,7 @@
   ---------------------------------------------------------------*/
 CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
                     float cell_size,
-                    bool factor_select[5],      // Factor Selector (Advection, MassCnservation, Diffusion, Vorticity and Obstacles)
+                    bool factor_select[4],      // Factor Selector (Advection, MassCnservation, Diffusion, Obstacles)
                     bool verbose,
                     bool estimateTiming=false)
 {
@@ -19,7 +19,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
     this->factor_select[1] = factor_select[1];
     this->factor_select[2] = factor_select[2];
     this->factor_select[3] = factor_select[3];
-    this->factor_select[4] = factor_select[4];
     this->verbose = verbose;
     this->estimateTiming = estimateTiming;
 
@@ -83,9 +82,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         {
             std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
             // Inform about the factors that will be set according to the selected priors
-            std::string factor_names[5] = {"Advection", "Mass Conservation", "Diffusion", "Vorticity", "Obstacles"};
+            std::string factor_names[4] = {"Advection", "Mass Conservation", "Diffusion", "Obstacles"};
             std::cerr << "[CGMRF] Prior factors selected: ";
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < 4; i++)
             {
                 if (factor_select[i])
                 {
@@ -328,89 +327,11 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             }
 
 
-            // -----------------------------------
-            // --- 3.3 VORTICITY               ---
-            // -----------------------------------
-            // Implementation of: dWy/dx - dWx/dy = 0 Irrotational field constraint
-            // Controls the vorticity of the field, that is, it forces to some extent the wind to not have vortices and swirls.
-            if (factor_select[3])
-            {
-                if(num_neighbors == 4)
-                {
-                    // 4 neighbors stencil (Von Neumann neighborhood) to compute the derivatives with finite differences. 
-                    // We set the factor only if the 4 neighbors are free
-                    if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
-                    {
-                        // Vorticity requires the 4 direct neighbours to be free
-                        bool can_compute_vorticity = is_cell_free(j + 1) && is_cell_free(j - 1) && 
-                                                    is_cell_free(j + m_size_x) && is_cell_free(j - m_size_x);
-
-                        if (can_compute_vorticity)
-                        {
-                            // Factor: Wy(right) - Wy(left) - Wx(top) + Wx(bottom) = 0
-                            
-                            // Wy components (indices j+N)
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) + 1, 1.0));  // Wy right
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) - 1, -1.0)); // Wy left
-                            
-                            // Wx components (indices j)
-                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x, -1.0)); // Wx top
-                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x, 1.0));  // Wx bottom
-
-                            factor_types.push_back({count, FactorType::Vorticity, j});
-                            count++;
-                        }
-                    }
-                }
-                else if(num_neighbors == 8)
-                {
-                    // 8 neighbors stencil (Moore neighborhood) to compute the derivatives with finite differences. 
-                    if (is_cell_free(j) && jx > 0 && jx < m_size_x - 1 && jy > 0 && jy < m_size_y - 1)
-                    {
-                        // Ensure all 8 neighbors are free to compute a symmetric 8-point curl
-                        bool can_compute_vorticity = 
-                            is_cell_free(j - 1) && is_cell_free(j + 1) &&           // W, E
-                            is_cell_free(j - m_size_x) && is_cell_free(j + m_size_x) && // S, N
-                            is_cell_free(j - m_size_x - 1) && is_cell_free(j - m_size_x + 1) && // SW, SE
-                            is_cell_free(j + m_size_x - 1) && is_cell_free(j + m_size_x + 1);    // NW, NE
-
-                        if (can_compute_vorticity)
-                        {
-                            // We use a weighted stencil for d/dx and d/dy (Sobel-style) 
-                            // to ensure the diagonal neighbors properly constrain the field.
-                            
-                            // --- dWy / dx term ---
-                            // Right neighbors (+)
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) + 1,              1.0));   // E
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x + 1,  0.5));   // NE
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x + 1,  0.5));   // SE
-                            // Left neighbors (-)
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) - 1,             -1.0));  // W
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) + m_size_x - 1, -0.5));  // NW
-                            J.push_back(Eigen::Triplet<double>(count, (j + N) - m_size_x - 1, -0.5));  // SW
-
-                            // --- dWx / dy term ---
-                            // Top neighbors (-)  [Remember: dWx/dy is subtracted in curl]
-                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x,            -1.0));  // N
-                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x + 1,        -0.5));  // NE
-                            J.push_back(Eigen::Triplet<double>(count, j + m_size_x - 1,        -0.5));  // NW
-                            // Bottom neighbors (+)
-                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x,             1.0));  // S
-                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x + 1,         0.5));  // SE
-                            J.push_back(Eigen::Triplet<double>(count, j - m_size_x - 1,         0.5));  // SW
-
-                            factor_types.push_back({count, FactorType::Vorticity, j});
-                            count++;
-                        }
-                    }
-                }
-            }
-
-
+            
             // ----------------------
-            // --- 3.4 OBSTACLES  ---
+            // --- 3.3 OBSTACLES  ---
             // ----------------------            
-            if (factor_select[4])
+            if (factor_select[3])
             {
                 // Goal: Force wind to zero at boundaries to prevent "bleeding" into walls.
                 int dx_card[] = {1, 0};  // E, N
@@ -509,7 +430,6 @@ CGMRF_map::~CGMRF_map()
 void CGMRF_map::update_lambdas(double m_lambdaPrior_adv,
                         double m_lambdaPrior_mass,
                         double m_lambdaPrior_diff,
-                        double m_lambdaPrior_vorticity, 
                         double m_lambdaPrior_obstacles
                         )
 {
@@ -517,21 +437,18 @@ void CGMRF_map::update_lambdas(double m_lambdaPrior_adv,
     lambdaPrior_advection = m_lambdaPrior_adv;
     lambdaPrior_mass_conservation = m_lambdaPrior_mass;
     lambdaPrior_diffusion = m_lambdaPrior_diff;
-    lambdaPrior_vorticity = m_lambdaPrior_vorticity;
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
 }
 
 void CGMRF_map::read_lambdas(double &m_lambdaPrior_adv,
                         double &m_lambdaPrior_mass,
-                        double &m_lambdaPrior_diff, 
-                        double &m_lambdaPrior_vorticity, 
+                        double &m_lambdaPrior_diff,
                         double &m_lambdaPrior_obstacles
                         )
 {
     m_lambdaPrior_adv = lambdaPrior_advection;
     m_lambdaPrior_mass = lambdaPrior_mass_conservation;
     m_lambdaPrior_diff = lambdaPrior_diffusion;
-    m_lambdaPrior_vorticity = lambdaPrior_vorticity;
     m_lambdaPrior_obstacles = lambdaPrior_obstacles;
 }
 
@@ -761,7 +678,7 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 
 /**
  * @brief Calculates the weight (Lambda) for a specific factor.
- * @param type The type of the factor (Advection, MassConservation, Vorticity, Obstacle, Regularization, etc.)
+ * @param type The type of the factor (Advection, MassConservation, Obstacle, Regularization, etc.)
  * @param cell_idx The index of the primary cell associated with the factor.
  * @param ux Previous estimation of the X-component of the wind at cell_idx.
  * @param uy Previous estimation of the Y-component of the wind at cell_idx.
@@ -805,15 +722,6 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
             return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
         case FactorType::MassConservation: 
             return lambdaPrior_mass_conservation;
-        case FactorType::Vorticity:
-        {
-            // Use the distance transform to allow more "turbulence" near obstacles
-            // and force "a bit more" laminar flow in open areas.
-            int cell_steps = m_cells_to_obs[cell_idx];
-            int d_laminar = 4;
-            double sigmoid_weight = 1.0 / (1.0 + std::exp(-5.0 * (cell_steps - d_laminar)));
-            return lambdaPrior_vorticity * sigmoid_weight;
-        }
         case FactorType::Diffusion: 
             return lambdaPrior_diffusion; // Isotropic regularization
         case FactorType::Obstacle: 

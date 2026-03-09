@@ -46,8 +46,8 @@ public:
     std::array<double, 4> compute_performance_metrics() const;
     void SimulateWindObservations(size_t N_obs);
     void SimulateFixedWindObservations();
-    void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_vort, double lambda_obst);
-    void read_lambdas(double &lambda_adv, double &lambda_mass, double &lambda_diff, double &lambda_vort, double &lambda_obst);
+    void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_obst);
+    void read_lambdas(double &lambda_adv, double &lambda_mass, double &lambda_diff, double &lambda_obst);
     void saveGMRFEstimationToCSV(const std::string& file_name);
     bool module_init;
     bool verbose;
@@ -57,12 +57,11 @@ public:
     template <typename T>
     bool evaluate_cost(const T* const params, T* residual) const
     {
-        // 1. Update GMRF lambdas (Advection, Mass conservation, Diffusion, Vorticity, Obstacles) with the current optimization parameters
+        // 1. Update GMRF lambdas (Advection, Mass conservation, Diffusion, Obstacles) with the current optimization parameters
         gmrf_map->update_lambdas( static_cast<double>(params[0]),
                                   static_cast<double>(params[1]),
                                   static_cast<double>(params[2]),
-                                  static_cast<double>(params[3]), 
-                                  static_cast<double>(params[4])
+                                  static_cast<double>(params[3])
                                 );
         
         // 2. Run MAP estimation and uncertainty computation
@@ -106,7 +105,6 @@ public:
     double GMRF_lambdaPrior_advection;         // Weight for advection prior (wind flow follows the flow lines)
     double GMRF_lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
     double GMRF_lambdaPrior_diffusion;         // Weight for diffusion prior (smoothness)
-    double GMRF_lambdaPrior_vorticity;         // Weight for vorticity prior (curl free) This one is dynamic, so this is the max value.
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind    
     double observation_var_wind_speed;         // Variance of the wind speed measurement (m/s)^2
     double observation_var_wind_direction;     // Variance of the wind direction measurement (rad)^2

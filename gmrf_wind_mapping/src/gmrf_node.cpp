@@ -48,7 +48,6 @@ Cgmrf::Cgmrf()
     GMRF_lambdaPrior_advection = declare_parameter<double>("GMRF_lambdaPrior_advection", 100.0);
     GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 100.0);
     GMRF_lambdaPrior_diffusion = declare_parameter<double>("GMRF_lambdaPrior_diffusion", 100.0);
-    GMRF_lambdaPrior_vorticity = declare_parameter<double>("GMRF_lambdaPrior_vorticity", 100.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10.0);
 
     // Observation variances (Gaussian likelihood)
@@ -182,10 +181,9 @@ void Cgmrf::initialize()
     
     // Create the GMRF-Map and initialize its Prior Factors
     // Set only factors with a Lambda_prior > 0, (avoids adding unnecessary factors to the graph)
-    bool factor_select[5] = {GMRF_lambdaPrior_advection > 0,
+    bool factor_select[4] = {GMRF_lambdaPrior_advection > 0,
                             GMRF_lambdaPrior_mass_conservation > 0, 
                             GMRF_lambdaPrior_diffusion > 0,
-                            GMRF_lambdaPrior_vorticity > 0, 
                             GMRF_lambdaPrior_obstacles > 0,
                             };
     my_map = std::make_unique<CGMRF_map>(occMap, 
@@ -194,7 +192,7 @@ void Cgmrf::initialize()
                                         verbose,
                                         true // estimateTiming
                                         );
-    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles);
+    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
     RCLCPP_INFO(get_logger(), "[GMRF-node] GMRF Initialized");
     module_init = true;
 
@@ -308,9 +306,8 @@ void Cgmrf::update()
     GMRF_lambdaPrior_advection = get_parameter("GMRF_lambdaPrior_advection").as_double();
     GMRF_lambdaPrior_mass_conservation = get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
     GMRF_lambdaPrior_diffusion = get_parameter("GMRF_lambdaPrior_diffusion").as_double();
-    GMRF_lambdaPrior_vorticity = get_parameter("GMRF_lambdaPrior_vorticity").as_double();
     GMRF_lambdaPrior_obstacles = get_parameter("GMRF_lambdaPrior_obstacles").as_double();
-    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_vorticity, GMRF_lambdaPrior_obstacles);
+    my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
 
     // Update GMRF estimation
      my_map->MAP_estimation_GMRF();
