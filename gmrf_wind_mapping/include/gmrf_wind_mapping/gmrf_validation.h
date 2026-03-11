@@ -46,6 +46,7 @@ public:
     std::array<double, 4> compute_performance_metrics() const;
     void SimulateWindObservations(size_t N_obs);
     void SimulateFixedWindObservations();
+    void clearEstimation();
     void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_obst);
     void read_lambdas(double &lambda_adv, double &lambda_mass, double &lambda_diff, double &lambda_obst);
     void saveGMRFEstimationToCSV(const std::string& file_name);
@@ -53,30 +54,51 @@ public:
     bool verbose;
     bool visualize_gmrf;
 
-    // CERES: The cost function for NLPD optimization
+    // CERES: The cost function for optimization
+    //------------------------------------------
     template <typename T>
-    bool evaluate_cost(const T* const params, T* residual) const
+    bool evaluate_cost(const std::string& optimization_metric, const T* const alpha, const T* const log_k, T* residual) const
     {
-        // 1. Update GMRF lambdas (Advection, Mass conservation, Diffusion, Obstacles) with the current optimization parameters
-        gmrf_map->update_lambdas( static_cast<double>(params[0]),
-                                  static_cast<double>(params[1]),
-                                  static_cast<double>(params[2]),
-                                  static_cast<double>(params[3])
-                                );
-        
-        // 2. Run MAP estimation and uncertainty computation
+        // 1. Softmax transform
+        double exp_alpha[4];
+        double sum_exp = 0.0;
+        for(int i = 0; i < 4; ++i) {
+            exp_alpha[i] = std::exp(alpha[i]);
+            sum_exp += exp_alpha[i];
+        }
+
+        // 2. Scale factors (k) 
+        double k = std::exp(log_k[0]);  // Ensure k is positive
+        double lambda[4];               // GMRF precision parameters to be updated in the GMRF map
+        for(int i = 0; i < 4; ++i) {
+            lambda[i] = k * (exp_alpha[i] / sum_exp);
+        }
+
+        // 3. Update GMRF lambdas (Advection, Mass conservation, Diffusion, Obstacles)
+        gmrf_map->update_lambdas( lambda[0], lambda[1], lambda[2], lambda[3] );
+
+        // 4. Run MAP estimation and uncertainty computation (when needed)
         gmrf_map->MAP_estimation_GMRF(num_iterations_MAP);
-        gmrf_map->computeUncertainty_GMRF();
+        if (optimization_metric == "anlpd")
+            gmrf_map->computeUncertainty_GMRF();
 
-        // 3. Compute performance metrics (AAE, RMSE, ANSP, NLPD)
+        // 5. Compute performance metrics (AAE, RMSE, ANSP, ANLPD)
         std::array<double, 4> metrics = this->compute_performance_metrics();
-        double AAE = metrics[0];  // AAE is the first element
-        double RMSE = metrics[1]; // RMSE is the second element
-        double ANSP = (-metrics[2]+1); // ANSP is the third element (normalized dot product, we want to maximize it. adding offset to allow negative values)
-        double ANLPD = metrics[3] + 20; // NLPD is the fourth element (adding offset to allow negative values)
+        double AAE = metrics[0];  // AAE (Average Angular Error)
+        double RMSE = metrics[1]; // RMSE (Root Mean Square Error)
+        double ANSP = (1-metrics[2]); // ANSP [-1,1] (Average Normalized Scalar Product) --> [0,2] where 0 is the best.
+        double ANLPD = metrics[3] + 20; // ANLPD (Average Negative Log Predictive Density) --> adding offset to allow negative values
 
-        // Metric to minimize
-        residual[0] = static_cast<T>(ANLPD);
+        // Metric to minimize (residual for optimization)
+        if (optimization_metric == "aae")
+            residual[0] = static_cast<T>(AAE);
+        else if (optimization_metric == "rmse")
+            residual[0] = static_cast<T>(RMSE);
+        else if (optimization_metric == "ansp")
+            residual[0] = static_cast<T>(ANSP);
+        else if (optimization_metric == "anlpd")
+            residual[0] = static_cast<T>(ANLPD);
+
         return true;
     }
 
@@ -108,7 +130,7 @@ public:
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind    
     double observation_var_wind_speed;         // Variance of the wind speed measurement (m/s)^2
     double observation_var_wind_direction;     // Variance of the wind direction measurement (rad)^2
-    int num_iterations_MAP;                 // Maximum number of iterations for the MAP estimation optimization
+    int num_iterations_MAP;                    // Maximum number of iterations for the MAP estimation optimization
     int experiment_number;                     // Number of the experiment to run
     
     // Variables
@@ -117,15 +139,18 @@ public:
     std::string metrics_filename;
 };
 
-// CERES Cost Functor for NLPD optimization
+// CERES Cost Functor for optimization
 struct CostFunctor
 {
     Cvalgt* gmrf_validation_node;
-    CostFunctor(Cvalgt* instance) : gmrf_validation_node(instance) {}
+    std::string optimization_metric;
+    CostFunctor(Cvalgt* instance, const std::string metric) : gmrf_validation_node(instance), optimization_metric(metric) {}
     
     template <typename T>
-    bool operator()(const T* const params, T* residual) const {
+    // bool operator()(const T* const params, T* residual) const
+    bool operator()(const T* const alpha, const T* const log_k, T* residual) const
+    {
         // Delegate the work to the class member function
-        return gmrf_validation_node->evaluate_cost(params, residual);
+        return gmrf_validation_node->evaluate_cost(optimization_metric, alpha, log_k, residual);
     }
 };
