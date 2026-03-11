@@ -918,9 +918,9 @@ int main(int argc, char** argv)
         // Dock one alpha parameter to avoid scale ambiguity (only optimize 3 alphas)
         std::vector<int> constant_alpha_indices;
         constant_alpha_indices.push_back(2); // Fix alpha_diffusion to 0 (lambda_diffusion = k*e^0 = k) and optimize the relative importance of the other lambdas with respect to diffusion
-        ceres::SubsetParameterization* alpha_parameterization = 
-            new ceres::SubsetParameterization(4, constant_alpha_indices);
-        problem_phase1.SetParameterization(alpha, alpha_parameterization);
+        ceres::SubsetManifold* alpha_parameterization = 
+            new ceres::SubsetManifold(4, constant_alpha_indices);
+        problem_phase1.SetManifold(alpha, alpha_parameterization);
 
 
         // ===================================================================
