@@ -15,10 +15,10 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     bool estimateTiming=false)
 {
     // Set Params    
-    this->factor_select[0] = factor_select[0];
-    this->factor_select[1] = factor_select[1];
-    this->factor_select[2] = factor_select[2];
-    this->factor_select[3] = factor_select[3];
+    this->factor_select[0] = factor_select[0];  // Advection
+    this->factor_select[1] = factor_select[1];  // Mass Conservation
+    this->factor_select[2] = factor_select[2];  // Diffusion
+    this->factor_select[3] = factor_select[3];  // Obstacles
     this->verbose = verbose;
     this->estimateTiming = estimateTiming;
 
@@ -522,6 +522,14 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
         std::cerr << "=============================================================" << std::endl;
         return false;
     }
+}
+
+bool CGMRF_map::is_cell_boundary(size_t id_gmrf)
+{
+    // Return true for cells at the borders of the map, which are considered as boundaries in CFD
+    size_t cell_x, cell_y;
+    id2cellxy(id_gmrf, cell_x, cell_y);
+    return (cell_x == 0 || cell_x == m_size_x - 1 || cell_y == 0 || cell_y == m_size_y - 1);
 }
 
 

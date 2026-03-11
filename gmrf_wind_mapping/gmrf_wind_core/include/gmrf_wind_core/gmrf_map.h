@@ -137,6 +137,7 @@ public:
     // helpers that need world coordinates for each GMRF cell.
     void id2xy_public(size_t id, double& x, double& y);
     bool is_cell_free(size_t id_gmrf);
+    bool is_cell_boundary(size_t id_gmrf);
      
     Eigen::Vector2i map_size()
     {
