@@ -131,6 +131,7 @@ public:
     // Read estimation
     WindVector getEstimation(int index);
     WindVector getEstimation(double x, double y);
+    void clearEstimation();
 
     // Public accessor to get cell center coordinates (x,y) in meters from cell index
     // This forwards to the internal id2xy() utility and is provided for visualization

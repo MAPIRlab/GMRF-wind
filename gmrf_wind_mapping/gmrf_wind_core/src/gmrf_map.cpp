@@ -656,9 +656,6 @@ void CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
 }
 
 
-
-
-
 void CGMRF_map::clearObservations_GMRF()
 {
     try
@@ -670,6 +667,27 @@ void CGMRF_map::clearObservations_GMRF()
     {
         std::cerr << "=============================================================" << std::endl;
         std::cerr << "[GMRF-clearObservations_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+    }
+}
+
+
+void CGMRF_map::clearEstimation()
+{
+    try
+    {
+        // Clear any existing estimation data
+        for (auto& cell : m_map)
+        {
+            cell.mean = 0.0;
+            cell.var = 0.0;
+            cell.covariance = 0.0;
+        }
+    }
+    catch (std::exception e)
+    {
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-clearEstimation] EXCEPTION: " << e.what() << std::endl;
         std::cerr << "=============================================================" << std::endl;
     }
 }
