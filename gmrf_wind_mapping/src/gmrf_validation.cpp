@@ -158,13 +158,15 @@ void Cvalgt::initialize()
     
     // Create the GMRF-Map and initialize its Prior Factors with the parameters from the ROS2 params server
     // Set only factors with a Lambda_prior > 0, (avoids adding unnecessary factors to the graph)
-    bool factor_select[4] = {GMRF_lambdaPrior_advection > 0, 
-                            GMRF_lambdaPrior_mass_conservation > 0, 
-                            GMRF_lambdaPrior_diffusion > 0,
-                            GMRF_lambdaPrior_obstacles > 0};
-    gmrf_map = std::make_unique<CGMRF_map>(occMap,
-                                        cell_size,
-                                        factor_select,
+    CGMRF_map::Parameters params{
+        cell_size,
+        GMRF_lambdaPrior_advection,
+        GMRF_lambdaPrior_mass_conservation,
+        GMRF_lambdaPrior_diffusion,
+        GMRF_lambdaPrior_obstacles,
+    };
+    gmrf_map = std::make_unique<CGMRF_map>(occMap, 
+                                        params,
                                         verbose,
                                         true // estimateTiming
                                         );

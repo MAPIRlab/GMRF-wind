@@ -1,7 +1,7 @@
 #include "gmrf_wind_core/gmrf_map.h"
 #include <cstdio>  // Necesario para fprintf
+#include <iomanip> // Necesario para std::setprecision
 #include <iostream>
-#include <iomanip>  // Necesario para std::setprecision
 #include <queue>
 
 using namespace gmrfw;
@@ -9,26 +9,26 @@ using namespace gmrfw;
 /*---------------------------------------------------------------
                         Constructor
   ---------------------------------------------------------------*/
-CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map, 
-                    float cell_size,
-                    bool factor_select[4],      // Factor Selector (Advection, MassCnservation, Diffusion, Obstacles)
-                    bool verbose,
-                    bool estimateTiming=false)
+CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
+                     const Parameters& params,
+                     bool verbose,
+                     bool estimateTiming = false)
 {
-    // Set Params    
-    this->factor_select[0] = factor_select[0];  // Advection
-    this->factor_select[1] = factor_select[1];  // Mass Conservation
-    this->factor_select[2] = factor_select[2];  // Diffusion
-    this->factor_select[3] = factor_select[3];  // Obstacles
+    // Set Params
+    this->factor_select[0] = params.lambdaPrior_advection > 0;         // Advection
+    this->factor_select[1] = params.lambdaPrior_mass_conservation > 0; // Mass Conservation
+    this->factor_select[2] = params.lambdaPrior_diffusion > 0;         // Diffusion
+    this->factor_select[3] = params.lambdaPrior_obstacles > 0;         // Obstacles
     this->verbose = verbose;
     this->estimateTiming = estimateTiming;
+    update_lambdas(params.lambdaPrior_advection, params.lambdaPrior_mass_conservation, params.lambdaPrior_diffusion, params.lambdaPrior_obstacles);
 
     try
     {
         // Copy params to internal variables
         m_Ocgridmap = oc_map;     // Occupancy gridMap ( from ROS2 MapServer or other sources)
-        m_resolution = cell_size; // Desired resolution to build the GMRF (m)
-        
+        m_resolution = params.cell_size; // Desired resolution to build the GMRF (m)
+
         //---------------------------------------
         // 0. Set GMRF Dimensions and Parameters
         //---------------------------------------
@@ -47,7 +47,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         // Now the number of cells should be integers:
         m_size_x = round((m_x_max - m_x_min) / m_resolution);
         m_size_y = round((m_y_max - m_y_min) / m_resolution);
-        N = m_size_x * m_size_y;    // Number of cells in the GMRF
+        N = m_size_x * m_size_y; // Number of cells in the GMRF
 
         std::cerr << "[GMRF_MAP] Generating GMRF for 2D WIND estimation..." << std::endl;
 
@@ -81,7 +81,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nFactors = nPriorFactors + nObsFactors;
         if (verbose)
         {
-            std::cerr <<  "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
+            std::cerr << "[CGMRF] Reserving Memory for Prior-factors" << std::endl;
             // Inform about the factors that will be set according to the selected priors
             std::string factor_names[4] = {"Advection", "Mass Conservation", "Diffusion", "Obstacles"};
             std::cerr << "[CGMRF] Prior factors selected: ";
@@ -101,19 +101,18 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         Lambda.clear();
         Lambda.reserve(nFactors); // Diagonal -> 1 entry for each factor
         factor_types.clear();
-       
+
         //-------------------------
         // 3. Prior Factors
         //-------------------------
         size_t count = 0;
-        int num_neighbors = 8;              // Whether to consider 4 or 8 neighbors when setting factors.
-        
+        int num_neighbors = 8; // Whether to consider 4 or 8 neighbors when setting factors.
+
         for (size_t j = 0; j < N; j++)
         {
             // Get cell_x and cell_y in the GMRF representation
             size_t jx, jy;
             id2cellxy(j, jx, jy);
-
 
             if (!is_cell_free(j))
             {
@@ -133,47 +132,55 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
 
             // --------------------------------
             // ---   3.0 ADVECTION PRIOR    ---
-            // --------------------------------            
-             if (factor_select[0])
-             {
-                // Wind in a cell should be similar to its neighbors in the direction of the wind. 
-                // This is a dynamic prior, so the weight (lambda) will depend on the current estimation 
+            // --------------------------------
+            if (factor_select[0])
+            {
+                // Wind in a cell should be similar to its neighbors in the direction of the wind.
+                // This is a dynamic prior, so the weight (lambda) will depend on the current estimation
                 // of the wind direction and will be updated at each iteration.
-                struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
-                std::vector<RegNeighbor> reg_nbs= {
-                    {1, 0, FactorType::AdvectionHoriz, false},  // E
-                    {0, 1, FactorType::AdvectionVert,  false}   // N
+                struct RegNeighbor
+                {
+                    int dx;
+                    int dy;
+                    FactorType type;
+                    bool is_diag;
+                };
+                std::vector<RegNeighbor> reg_nbs = {
+                    {1, 0, FactorType::AdvectionHoriz, false}, // E
+                    {0, 1, FactorType::AdvectionVert, false}   // N
                 };
 
                 if (num_neighbors == 8)
                 {
                     // Consider also diagonals
-                    reg_nbs.push_back({1, 1, FactorType::AdvectionDiag1, true});    // NE
-                    reg_nbs.push_back({-1, 1, FactorType::AdvectionDiag2, true});   // NW
+                    reg_nbs.push_back({1, 1, FactorType::AdvectionDiag1, true});  // NE
+                    reg_nbs.push_back({-1, 1, FactorType::AdvectionDiag2, true}); // NW
                 }
-                
-                for (const auto& nb : reg_nbs) 
+
+                for (const auto& nb : reg_nbs)
                 {
                     int nx = (int)jx + nb.dx;
                     int ny = (int)jy + nb.dy;
-                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
-                    
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y)
+                        continue;
+
                     // Neighbor idx
                     size_t nj = cellxy2id(nx, ny);
 
                     // Only if BOTH cells are free
-                    if (is_cell_free(j) &&is_cell_free(nj)) 
+                    if (is_cell_free(j) && is_cell_free(nj))
                     {
                         bool can_connect = true;
                         // If diagonal, check the "elbow" cells to avoid advection through corners
-                        if (nb.is_diag) 
+                        if (nb.is_diag)
                         {
-                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
+                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy)))
+                            {
                                 can_connect = false;
                             }
                         }
 
-                        if (can_connect) 
+                        if (can_connect)
                         {
                             // Link Wx
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
@@ -189,7 +196,6 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     }
                 }
             }
-
 
             // --------------------------------
             // --- 3.1 MASS CONSERVATION    ---
@@ -273,12 +279,18 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             // ---  3.2  VISCOUS DIFFUSION  ---
             // --------------------------------
             if (factor_select[2])
-            {       
+            {
                 // Tikhonov (L2) regularization: smoothness prior. Force neighboring cells to have similar wind values
-                struct RegNeighbor { int dx; int dy; FactorType type; bool is_diag; };
-                std::vector<RegNeighbor> reg_nbs= {
-                    {1, 0, FactorType::Diffusion, false},  // E
-                    {0, 1, FactorType::Diffusion,  false}   // N
+                struct RegNeighbor
+                {
+                    int dx;
+                    int dy;
+                    FactorType type;
+                    bool is_diag;
+                };
+                std::vector<RegNeighbor> reg_nbs = {
+                    {1, 0, FactorType::Diffusion, false}, // E
+                    {0, 1, FactorType::Diffusion, false}  // N
                 };
                 /*
                 if (num_neighbors == 8)
@@ -288,29 +300,31 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     reg_nbs.push_back({-1, 1, FactorType::Diffusion, true});   // NW
                 }
                 */
-                
-                for (const auto& nb : reg_nbs) 
+
+                for (const auto& nb : reg_nbs)
                 {
                     int nx = (int)jx + nb.dx;
                     int ny = (int)jy + nb.dy;
-                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
-                    
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y)
+                        continue;
+
                     // neighbor idx
                     size_t nj = cellxy2id(nx, ny);
 
                     // Only regularize if BOTH cells are free
-                    if (is_cell_free(j) &&is_cell_free(nj)) 
+                    if (is_cell_free(j) && is_cell_free(nj))
                     {
                         bool can_connect = true;
                         // If diagonal, check the "elbow" cells to avoid smoothing through corners
-                        if (nb.is_diag) 
+                        if (nb.is_diag)
                         {
-                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy))) {
+                            if (!is_cell_free(cellxy2id(jx, ny)) || !is_cell_free(cellxy2id(nx, jy)))
+                            {
                                 can_connect = false;
                             }
                         }
 
-                        if (can_connect) 
+                        if (can_connect)
                         {
                             // Smooth Wx
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
@@ -327,48 +341,51 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 }
             }
 
-
-            
             // ----------------------
             // --- 3.3 OBSTACLES  ---
-            // ----------------------            
+            // ----------------------
             if (factor_select[3])
             {
                 // Goal: Force wind to zero at boundaries to prevent "bleeding" into walls.
-                int dx_card[] = {1, 0};  // E, N
-                int dy_card[] = {0, 1};  // E, N
+                int dx_card[] = {1, 0}; // E, N
+                int dy_card[] = {0, 1}; // E, N
 
                 // Only consider E and N neighbors (never diagonals)
-                for (int i = 0; i < 2; i++) 
+                for (int i = 0; i < 2; i++)
                 {
                     // neighbor idx
                     int nx = (int)jx + dx_card[i];
                     int ny = (int)jy + dy_card[i];
-                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y) continue;
-                    
+                    if (nx < 0 || nx >= m_size_x || ny < 0 || ny >= m_size_y)
+                        continue;
+
                     size_t nj = cellxy2id(nx, ny);
-                    
+
                     // If one is free and the neighbor is an obstacle (or vice-versa)
-                    if (is_cell_free(j) != is_cell_free(nj)) 
+                    if (is_cell_free(j) != is_cell_free(nj))
                     {
                         size_t free_cell = is_cell_free(j) ? j : nj;
-                        
-                        if (dx_card[i] != 0) {
+
+                        if (dx_card[i] != 0)
+                        {
                             // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
                             J.push_back(Eigen::Triplet<double>(count, free_cell, 1.0));
                             factor_types.push_back({count, FactorType::Obstacle, free_cell});
                             count++;
-                        } else {
+                        }
+                        else
+                        {
                             // Vertical neighbor: Obstacle is above/below. Force Wy = 0
                             J.push_back(Eigen::Triplet<double>(count, free_cell + N, 1.0));
                             factor_types.push_back({count, FactorType::Obstacle, free_cell});
                             count++;
                         }
                     }
-                    else if ( is_cell_free(j) && is_cell_free(nj) && !check_connectivity_between2cells(j, nj) )
+                    else if (is_cell_free(j) && is_cell_free(nj) && !check_connectivity_between2cells(j, nj))
                     {
                         // An obstacle is in between cells j and j+1 (not seen due to resolution).
-                        if (dx_card[i] != 0) {
+                        if (dx_card[i] != 0)
+                        {
                             // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
                             factor_types.push_back({count, FactorType::Obstacle, j});
@@ -376,7 +393,9 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                             J.push_back(Eigen::Triplet<double>(count, nj, 1.0));
                             factor_types.push_back({count, FactorType::Obstacle, nj});
                             count++;
-                        } else {
+                        }
+                        else
+                        {
                             // Vertical neighbor: Obstacle is above/below. Force Wy = 0
                             J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
                             factor_types.push_back({count, FactorType::Obstacle, j});
@@ -388,8 +407,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                     }
                 }
             }
-            
-            
+
         } // end for setting factors
 
         // Total Number of Factors
@@ -397,7 +415,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
         nPriorFactors = count;
         nFactors = nPriorFactors + nObsFactors;
         activeObs.clear();
-        std::cerr <<  "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
+        std::cerr << "[CGMRF] Initialization Complete: " << nFactors << " factors for a map size of 2N=" << m_map.size() << " nodes" << std::endl;
 
         // Compute Distance to the closest obstacle for each cell (for later use in the Lambda factors)
         computeDistanceTransform();
@@ -426,12 +444,10 @@ CGMRF_map::~CGMRF_map()
 {
 }
 
-
 void CGMRF_map::update_lambdas(double m_lambdaPrior_adv,
-                        double m_lambdaPrior_mass,
-                        double m_lambdaPrior_diff,
-                        double m_lambdaPrior_obstacles
-                        )
+                               double m_lambdaPrior_mass,
+                               double m_lambdaPrior_diff,
+                               double m_lambdaPrior_obstacles)
 {
     // Update internal precision parameters
     lambdaPrior_advection = m_lambdaPrior_adv;
@@ -440,11 +456,10 @@ void CGMRF_map::update_lambdas(double m_lambdaPrior_adv,
     lambdaPrior_obstacles = m_lambdaPrior_obstacles;
 }
 
-void CGMRF_map::read_lambdas(double &m_lambdaPrior_adv,
-                        double &m_lambdaPrior_mass,
-                        double &m_lambdaPrior_diff,
-                        double &m_lambdaPrior_obstacles
-                        )
+void CGMRF_map::read_lambdas(double& m_lambdaPrior_adv,
+                             double& m_lambdaPrior_mass,
+                             double& m_lambdaPrior_diff,
+                             double& m_lambdaPrior_obstacles)
 {
     m_lambdaPrior_adv = lambdaPrior_advection;
     m_lambdaPrior_mass = lambdaPrior_mass_conservation;
@@ -517,7 +532,6 @@ bool CGMRF_map::is_cell_boundary(size_t id_gmrf)
     id2cellxy(id_gmrf, cell_x, cell_y);
     return (cell_x == 0 || cell_x == m_size_x - 1 || cell_y == 0 || cell_y == m_size_y - 1);
 }
-
 
 /*---------------------------------------------------------------
              Check cell interconnectivity
@@ -675,7 +689,6 @@ void CGMRF_map::clearObservations_GMRF()
     }
 }
 
-
 void CGMRF_map::clearEstimation()
 {
     try
@@ -705,7 +718,6 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
     }
 }
 
-
 /**
  * @brief Calculates the weight (Lambda) for a specific factor.
  * @param type The type of the factor (Advection, MassConservation, Obstacle, Regularization, etc.)
@@ -725,9 +737,10 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
     bool has_valid_direction = !std::isnan(ux) && !std::isnan(uy) && mag_sq > 1e-6;
 
     // Helper to calculate anisotropic weight based on alignment with a unit vector (cos, sin)
-    auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal) 
+    auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal)
     {
-        if (!has_valid_direction) {
+        if (!has_valid_direction)
+        {
             return 0.0; // Low wind: negligible advection
         }
 
@@ -735,48 +748,45 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
         // We square the result to get the "alignment" factor [0, 1]
         double dot_product = (ux * axis_x + uy * axis_y);
         double alignment = std::abs(dot_product) / mag; // Cosine of the angle between wind and axis (absolute value)
-        
-        double weight = lambdaPrior_advection * pow(alignment,10);
+
+        double weight = lambdaPrior_advection * pow(alignment, 10);
         return weight;
     };
 
-    switch (type) 
+    switch (type)
     {
-        case FactorType::AdvectionHoriz:
-            return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
-        case FactorType::AdvectionVert:
-            return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
-        case FactorType::AdvectionDiag1:
-            return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
-        case FactorType::AdvectionDiag2:
-            return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
-        case FactorType::MassConservation: 
-            return lambdaPrior_mass_conservation;
-        case FactorType::Diffusion: 
-            return lambdaPrior_diffusion; // Isotropic regularization
-        case FactorType::Obstacle: 
-            return lambdaPrior_obstacles;
-        default: 
-        {
-            std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
-            return 0.0001;
-        }
+    case FactorType::AdvectionHoriz:
+        return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
+    case FactorType::AdvectionVert:
+        return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
+    case FactorType::AdvectionDiag1:
+        return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
+    case FactorType::AdvectionDiag2:
+        return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
+    case FactorType::MassConservation:
+        return lambdaPrior_mass_conservation;
+    case FactorType::Diffusion:
+        return lambdaPrior_diffusion; // Isotropic regularization
+    case FactorType::Obstacle:
+        return lambdaPrior_obstacles;
+    default: {
+        std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
+        return 0.0001;
+    }
     }
 }
 
-
-
-void CGMRF_map::computeDistanceTransform() 
+void CGMRF_map::computeDistanceTransform()
 {
     // This function computes the distance from each cell to the nearest obstacle using a breadth-first search (BFS) approach.
 
-    m_cells_to_obs.assign(N, std::numeric_limits<int>::max()); 
+    m_cells_to_obs.assign(N, std::numeric_limits<int>::max());
     std::queue<size_t> q;
 
     // 1. Seed Obstacles (distance = 0)
-    for (size_t j = 0; j < N; j++) 
+    for (size_t j = 0; j < N; j++)
     {
-        if (!is_cell_free(j)) 
+        if (!is_cell_free(j))
         {
             m_cells_to_obs[j] = 0;
             q.push(j);
@@ -787,7 +797,7 @@ void CGMRF_map::computeDistanceTransform()
     int dx[] = {1, -1, 0, 0, 1, 1, -1, -1};
     int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
 
-    while (!q.empty()) 
+    while (!q.empty())
     {
         size_t curr_idx = q.front();
         q.pop();
@@ -795,16 +805,16 @@ void CGMRF_map::computeDistanceTransform()
         size_t cx, cy;
         id2cellxy(curr_idx, cx, cy);
 
-        for (int i = 0; i < 8; i++) 
+        for (int i = 0; i < 8; i++)
         {
             int nx = (int)cx + dx[i];
             int ny = (int)cy + dy[i];
 
             // Check bounds
-            if (nx >= 0 && nx < (int)m_size_x && ny >= 0 && ny < (int)m_size_y) 
+            if (nx >= 0 && nx < (int)m_size_x && ny >= 0 && ny < (int)m_size_y)
             {
                 size_t next_idx = cellxy2id(nx, ny);
-                if (m_cells_to_obs[next_idx] == std::numeric_limits<int>::max()) 
+                if (m_cells_to_obs[next_idx] == std::numeric_limits<int>::max())
                 {
                     m_cells_to_obs[next_idx] = m_cells_to_obs[curr_idx] + 1;
                     q.push(next_idx);
@@ -814,7 +824,6 @@ void CGMRF_map::computeDistanceTransform()
     }
 }
 
-
 /*---------------------------------------------------------------
                 MAXIMUM A POSTERIORI Estimation GMRF
   ---------------------------------------------------------------*/
@@ -823,33 +832,34 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
     try
     {
         /*
-        * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
-        *              J is size (nFactors x NumNodes)
-        *
-        * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
-        *              Lambda is size (nFactors x nFactors).
-        *
-        * Y (vector of observations) contains the values of observations, 0 for prior factors
-        *              y is size (nFactors x 1)
-        *
-        * R (Residuals) Since our system is deterministic, the residuals do not
-        *              need to be re-evaluated on each iteration (we only perform 1 iteration).
-        *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
-        *
-        * H (Hessian) = J' * Lambda * J
-        *               H is size (NumNodes x NumNodes)
-        *
-        * G (gradient) = J' * Lambda * R
-        *               g is size (NumNodes x 1)
-        */
+         * J (Jacobian) The J matrix contains the dr/dm for every factor in the graph
+         *              J is size (nFactors x NumNodes)
+         *
+         * Lambda (weights) Is the Diagonal information matrix (contains the weights for each factor)
+         *              Lambda is size (nFactors x nFactors).
+         *
+         * Y (vector of observations) contains the values of observations, 0 for prior factors
+         *              y is size (nFactors x 1)
+         *
+         * R (Residuals) Since our system is deterministic, the residuals do not
+         *              need to be re-evaluated on each iteration (we only perform 1 iteration).
+         *              Therefore, R = -y, since we ALWAYS start from a all 0 map state.
+         *
+         * H (Hessian) = J' * Lambda * J
+         *               H is size (NumNodes x NumNodes)
+         *
+         * G (gradient) = J' * Lambda * R
+         *               g is size (NumNodes x 1)
+         */
         if (verbose)
             std::cerr << "[CGMRF-MAP] Starting MAP Estimation with " << m_picard_iterations << " Picard-like iterations..." << std::endl;
 
-        if (estimateTiming) meanTimer.start();
+        if (estimateTiming)
+            meanTimer.start();
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
-        
+
         // -----------------------------------------
         // ITERATIVE PICARD-LIKE APPROACH TO UPDATE LAMBDA
         // -----------------------------------------
@@ -871,14 +881,14 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             // LAMBDA PRIOR FACTORS (Dynamic values based on current wind estimation)
             for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
             {
-                // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)          
+                // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)
                 double lambda_value = getLambdaValue(it->type, it->cell_idx, m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean);
                 Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
                 Lambda_temp.push_back(lambda_entry);
             }
 
             // 4. OBSERVATION FACTORS
-            size_t count = nPriorFactors;       // start after the already introduced prior factors
+            size_t count = nPriorFactors; // start after the already introduced prior factors
             for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
             {
                 bool x_y_independent = false;
@@ -887,32 +897,33 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 {
                     // Each observation translates to 2 factors (Wx,Wy)
                     // Wx range [1,N]
-                    Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);            
+                    Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
                     J_temp.push_back(J_entry);
                     y_temp[count] = ito->wind_x;
-                    Eigen::Triplet<double> lambda_entry(count, count, 1.0/ito->var_xx);
+                    Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
                     Lambda_temp.push_back(lambda_entry);
                     count++;
 
-                    // Wy range [N+1,2N]            
-                    Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);                
+                    // Wy range [N+1,2N]
+                    Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
                     J_temp.push_back(J_entry2);
                     y_temp[count] = ito->wind_y;
-                    Eigen::Triplet<double> lambda_entry2(count, count, 1.0/ito->var_yy);
+                    Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
                     Lambda_temp.push_back(lambda_entry2);
                     count++;
                 }
                 else
                 {
-                    // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates), 
-                    // we would need to introduce off-diagonal terms in Lambda.                    
+                    // If we consider correlation between Wx and Wy components of the same observation (derived from original Polar coordinates),
+                    // we would need to introduce off-diagonal terms in Lambda.
 
                     double var_xx = ito->var_xx;
                     double var_yy = ito->var_yy;
                     double cov_xy = ito->cov_xy;
-                    // 2. Invert 2x2 matrix to get Precision (Lambda)                
+                    // 2. Invert 2x2 matrix to get Precision (Lambda)
                     double det = var_xx * var_yy - cov_xy * cov_xy;
-                    if (det < 1e-9) det = 1e-9; // Add small epsilon for numerical stability if r approx 0
+                    if (det < 1e-9)
+                        det = 1e-9; // Add small epsilon for numerical stability if r approx 0
 
                     // Lambda_uv = inv(Sigma_xy) = (1/det) * [var_yy, -cov_xy; -cov_xy, var_xx]
                     double L_xx = var_yy / det;
@@ -931,46 +942,44 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
 
                     // Fill the 2x2 Precision Block in Lambda
                     // This links row 'count' and 'count+1'
-                    Lambda_temp.push_back(Eigen::Triplet<double>(count,     count,     L_xx)); // diagonal x
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count, count, L_xx));         // diagonal x
                     Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count + 1, L_yy)); // diagonal y
-                    Lambda_temp.push_back(Eigen::Triplet<double>(count,     count + 1, L_xy)); // cross-term
-                    Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count,     L_xy)); // cross-term (symmetric)
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count, count + 1, L_xy));     // cross-term
+                    Lambda_temp.push_back(Eigen::Triplet<double>(count + 1, count, L_xy));     // cross-term (symmetric)
 
                     count += 2;
                 }
             }
 
-            
             // 5. Build Matrices (J, J', Lambda(A), H, G)
             Jsparse.resize(nFactors, 2 * N); // declares a column-major sparse matrix type of float
             Jsparse.setFromTriplets(J_temp.begin(), J_temp.end());
             if (verbose)
-                std::cerr <<  "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
+                std::cerr << "          [GMRF] Jsparse is (" << Jsparse.rows() << "," << Jsparse.cols() << ")" << std::endl;
 
             Eigen::SparseMatrix<double> JsparseT = Jsparse.transpose();
             if (verbose)
-                std::cerr <<  "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
+                std::cerr << "          [GMRF] JsparseT is (" << JsparseT.rows() << "," << JsparseT.cols() << ")" << std::endl;
 
             Eigen::SparseMatrix<double> Asparse(nFactors, nFactors); // declares a column-major sparse matrix type of float
             Asparse.setFromTriplets(Lambda_temp.begin(), Lambda_temp.end());
             if (verbose)
-                std::cerr <<  "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")" << std::endl;
+                std::cerr << "          [GMRF] Asparse is (" << Asparse.rows() << "," << Asparse.cols() << ")" << std::endl;
 
             Hsparse.resize(2 * N, 2 * N);
             Hsparse = JsparseT * Asparse * Jsparse; // size(2*N,2*N);
             if (verbose)
-                std::cerr <<  "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
+                std::cerr << "          [GMRF] Hsparse is (" << Hsparse.rows() << "," << Hsparse.cols() << ")" << std::endl;
 
-            Eigen::VectorXd G = JsparseT * Asparse * y_temp;  // size(2*N,1);
+            Eigen::VectorXd G = JsparseT * Asparse * y_temp; // size(2*N,1);
             if (verbose)
-                std::cerr <<  "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
-            
-            
+                std::cerr << "          [GMRF] G is (" << G.rows() << "," << G.cols() << ")" << std::endl;
+
             //----------------------
             // 6. SOLVE H * m = G
             //----------------------
             // Sanity check for NaNs or Infs in Hsparse before factorization
-            if (!Hsparse.coeffs().allFinite()) 
+            if (!Hsparse.coeffs().allFinite())
             {
                 std::cerr << "=============================================================" << std::endl;
                 std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Hessian matrix contains NaNs or Infs." << "\033[0m" << std::endl;
@@ -985,19 +994,22 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 // Check the diagonal values of Hsparse to identify potential zero or near-zero entries that could indicate singularity or ill-conditioning.
                 std::cerr << "H max diag: " << Hsparse.diagonal().maxCoeff() << std::endl;
                 std::cerr << "H min diag: " << Hsparse.diagonal().minCoeff() << std::endl;
-                
+
                 Eigen::VectorXd diag = Hsparse.diagonal();
-                if (diag.size() != 2 * N) 
+                if (diag.size() != 2 * N)
                 {
-                    std::cerr << "Error de dimensiones: Diag " << diag.size() << " vs 2*N " << 2*N << std::endl;
+                    std::cerr << "Error de dimensiones: Diag " << diag.size() << " vs 2*N " << 2 * N << std::endl;
                     return;
                 }
-                
+
                 int zero_count = 0;
-                for (int i = 0; i < diag.size(); ++i) {
-                    if (std::abs(diag(i)) < 1e-12) {
+                for (int i = 0; i < diag.size(); ++i)
+                {
+                    if (std::abs(diag(i)) < 1e-12)
+                    {
                         zero_count++;
-                        if (zero_count < 10) { // Solo imprimimos los primeros 10 para no colapsar
+                        if (zero_count < 10)
+                        { // Solo imprimimos los primeros 10 para no colapsar
                             int cell_idx = (i < N) ? i : i - N;
                             const char* comp = (i < N) ? "Wx" : "Wy";
                             std::cerr << "[GMRF] Nodo " << i << " (Celda " << cell_idx << " " << comp << ") es CERO." << std::endl;
@@ -1012,14 +1024,14 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             }
 
             // Cholesky Factorization of Hessian (H = L * D * L')
-            solver.compute(Hsparse);    // Computes the sparse Cholesky decomposition
+            solver.compute(Hsparse); // Computes the sparse Cholesky decomposition
             if (solver.info() != Eigen::Success)
             {
                 // In red color for better visibility
                 std::cerr << "=============================================================" << std::endl;
                 std::cerr << "\033[1;31m" << "[GMRF-MAP] ERROR: Failed to compute Cholesky factorization of Hsparse. The system might be ill-conditioned or singular. MAP estimation cannot proceed." << "\033[0m" << std::endl;
                 std::cerr << "=============================================================" << std::endl;
-            
+
                 std::string ComputationInfo[4] = {"Success", "NumericalIssue", "NoConvergence", "InvalidInput"};
                 std::cerr << "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << std::endl;
                 return;
@@ -1028,14 +1040,14 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             // Get MAP solution: m_MAP_sol = H^-1 * G
             m_MAP_sol = solver.solve(G);
             if (false)
-                std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
-                       
+                std::cerr << "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
+
             // 7. Update GMRF values from current iteration solution (MAP estimation)
             for (size_t j = 0; j < m_map.size(); j++)
             {
-                m_map[j].mean = m_MAP_sol(j);   // Can be iterative (if advection prior is used)
-                m_map[j].var = 0.0;             // Not estimated yet.
-                m_map[j].covariance = 0.0;      // Not estimated yet.
+                m_map[j].mean = m_MAP_sol(j); // Can be iterative (if advection prior is used)
+                m_map[j].var = 0.0;           // Not estimated yet.
+                m_map[j].covariance = 0.0;    // Not estimated yet.
             }
 
             // 8. Residual Vector (r = J*m - y)
@@ -1044,17 +1056,19 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             double weighted_residual_norm = sqrt(residual.transpose() * Asparse * residual);
 
             if (verbose)
-                std::cerr << "[GMRF] MAP estimated --> Picard iteration: " << iter+1 << ". Weighted residual norm: " << weighted_residual_norm << std::endl;
-            
+                std::cerr << "[GMRF] MAP estimated --> Picard iteration: " << iter + 1 << ". Weighted residual norm: " << weighted_residual_norm << std::endl;
+
             // Check convergence based on relative change in weighted residual norm
             double rel_change = std::abs(prev_weighted_residual_norm - weighted_residual_norm) / prev_weighted_residual_norm;
-            if (rel_change < 1e-3) {
-                if (verbose) std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
+            if (rel_change < 1e-3)
+            {
+                if (verbose)
+                    std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
                 break;
             }
             prev_weighted_residual_norm = weighted_residual_norm;
 
-        }   //end of Picard iterations
+        } // end of Picard iterations
 
         if (estimateTiming)
         {
