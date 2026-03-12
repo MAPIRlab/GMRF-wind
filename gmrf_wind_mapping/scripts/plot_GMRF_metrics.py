@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# -------------------------------------------------------------------------------
+# Plots the evolution of Lambda parameters from the "average results"
+# -------------------------------------------------------------------------------
 import os
 import pandas as pd
 import numpy as np
@@ -11,7 +14,7 @@ import matplotlib.pyplot as plt
 
 
 # Configuration
-metrics_file = "NLPD_optimization_results_central_obstacle_05ms/gmrf_opt_metrics_lambda_Nobs.csv"
+metrics_file = "NLPD_optimization_results_central_obstacle_1ms/gmrf_opt_metrics_lambda_Nobs.csv"
 base_name = os.path.splitext(metrics_file)[0]
 out_file = base_name + '.png'
 output_dir = "metrics_plots"

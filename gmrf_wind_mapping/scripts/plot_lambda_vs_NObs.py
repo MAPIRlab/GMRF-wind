@@ -1,6 +1,7 @@
+# -------------------------------------------------------------------------------
 # Script to visualize the evolution and distribution of lambda parameters
-# across multiple varying the number of observations
-
+# across multiple scenarios and varying the number of observations
+# -------------------------------------------------------------------------------
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -9,9 +10,9 @@ import os
 import numpy as np
 import re
 
-# ----------------------------------
-# 1. CONFIGURATION
-# ----------------------------------
+# ---------------------------------------
+# 1. CONFIGURATION (fodlers to consider)
+# ---------------------------------------
 folders = [#'NLPD_optimization_results_central_obstacle_01ms', 
            #'NLPD_optimization_results_central_obstacle_05ms', 
            'NLPD_optimization_results_central_obstacle_1ms',
@@ -19,7 +20,7 @@ folders = [#'NLPD_optimization_results_central_obstacle_01ms',
            #'NLPD_optimization_results_snake_05ms',
            #'NLPD_optimization_results_snake_1ms',
            ]
-lambda_cols = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles']
+lambda_cols = ['Lambda_Mass', 'Lambda_Vorticity', 'Lambda_Obstacles', 'Lambda_Reg']
 cleaned_data_list = []
 
 

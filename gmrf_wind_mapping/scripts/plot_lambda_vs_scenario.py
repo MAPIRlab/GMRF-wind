@@ -12,8 +12,8 @@ import re
 # ----------------------------------
 # 1. CONFIGURATION
 # ----------------------------------
-folders = [#'NLPD_optimization_results_central_obstacle_01ms', 
-           #'NLPD_optimization_results_central_obstacle_05ms', 
+folders = ['NLPD_optimization_results_central_obstacle_01ms', 
+           'NLPD_optimization_results_central_obstacle_05ms', 
            'NLPD_optimization_results_central_obstacle_1ms',
            #'NLPD_optimization_results_snake_01ms',
            #'NLPD_optimization_results_snake_05ms',
