@@ -84,20 +84,37 @@ public:
 
         // 5. Compute performance metrics (AAE, RMSE, ANSP, ANLPD)
         std::array<double, 4> metrics = this->compute_performance_metrics();
-        double AAE = metrics[0];  // AAE (Average Angular Error)
-        double RMSE = metrics[1]; // RMSE (Root Mean Square Error)
-        double ANSP = (1-metrics[2]); // ANSP [-1,1] (Average Normalized Scalar Product) --> [0,2] where 0 is the best.
-        double ANLPD = metrics[3] + 20; // ANLPD (Average Negative Log Predictive Density) --> adding offset to allow negative values
+        double res_AAE = metrics[0];  // AAE (Average Angular Error) [0,1] --> 0 is the best.
+        double res_RMSE = metrics[1]; // RMSE (Root Mean Square Error) [0,inf) --> 0 is the best.
+        double res_ANSP = (1-metrics[2]); // ANSP [-1,1] (Average Normalized Scalar Product) --> [0,2] where 0 is the best.
+        double res_ANLPD = metrics[3] + 20; // ANLPD (Average Negative Log Predictive Density) --> adding offset to allow negative values
 
+        
         // Metric to minimize (residual for optimization)
         if (optimization_metric == "aae")
-            residual[0] = static_cast<T>(AAE);
+            residual[0] = static_cast<T>(res_AAE);
         else if (optimization_metric == "rmse")
-            residual[0] = static_cast<T>(RMSE);
+            residual[0] = static_cast<T>(res_RMSE);
         else if (optimization_metric == "ansp")
-            residual[0] = static_cast<T>(ANSP);
+        {
+            // check
+            if (std::isnan(res_ANSP) || std::isinf(res_ANSP)) {
+                std::cerr << "Numerical instability detected in ANSP: " << res_ANSP << std::endl;
+                return false; // Indica a Ceres que reduzca el tamaño del paso
+            }
+            residual[0] = static_cast<T>(res_ANSP);
+            //std::cerr << "ANSP: " << metrics[2] << std::endl;
+        }
         else if (optimization_metric == "anlpd")
-            residual[0] = static_cast<T>(ANLPD);
+        {
+            // check
+            if (std::isnan(res_ANLPD) || std::isinf(res_ANLPD)) {
+                std::cerr << "Numerical instability detected in ANPD: " << res_ANLPD << std::endl;
+                return false; // Indica a Ceres que reduzca el tamaño del paso
+            }
+            residual[0] = static_cast<T>(res_ANLPD);
+            //std::cerr << "ANLPD: " << metrics[3] << std::endl;
+        }
 
         return true;
     }
