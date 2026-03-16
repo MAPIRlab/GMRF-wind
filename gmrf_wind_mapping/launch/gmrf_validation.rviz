@@ -31,7 +31,7 @@ Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.5
-      Cell Size: 0.30000001192092896
+      Cell Size: 0.25
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
       Enabled: true
@@ -114,7 +114,7 @@ Visualization Manager:
         Value: /wind_gt_array_pub
       Value: false
     - Class: rviz_default_plugins/Marker
-      Enabled: true
+      Enabled: false
       Name: METRIC-comparison
       Namespaces:
         {}
@@ -125,7 +125,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /metric_pub
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -203,5 +203,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1536
-  X: 0
-  Y: 23
+  X: 8
+  Y: 31
