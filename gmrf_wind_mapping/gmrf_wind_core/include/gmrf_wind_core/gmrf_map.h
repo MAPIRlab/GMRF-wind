@@ -93,7 +93,7 @@ enum class FactorType {
     Diffusion,
     Obstacle,
     Observation,
-    //Regularization,
+    Regularization,
     //RegularizationHoriz,
     //RegularizationVert,
     //RegularizationDiag1,    // +45 deg
@@ -104,6 +104,7 @@ struct FactorInfo {
     size_t row_idx;    // The 'count' to identify the row in J and Lambda
     FactorType type;   // Type of factor (MassConservation, Diffusion, etc.)
     size_t cell_idx;   // The 'j' index of the central cell associated with the factor
+    size_t neighbor_cell_idx; // The 'nj' index of the neighboring cell associated with the factor
 };
 
 class CGMRF_map
@@ -136,21 +137,21 @@ public:
     // Public accessor to get cell center coordinates (x,y) in meters from cell index
     // This forwards to the internal id2xy() utility and is provided for visualization
     // helpers that need world coordinates for each GMRF cell.
-    void id2xy_public(size_t id, double& x, double& y);
-    bool is_cell_free(size_t id_gmrf);
-    bool is_cell_boundary(size_t id_gmrf);
+    void id2xy_public(size_t id, double& x, double& y) const;
+    bool is_cell_free(size_t id_gmrf) const;
+    bool is_cell_boundary(size_t id_gmrf) const;
      
-    Eigen::Vector2i map_size()
+    Eigen::Vector2i map_size() const
     {
         return {m_size_x, m_size_y};
     }
 
-    float map_resolution()
+    float map_resolution() const
     {
         return m_resolution;
     }
 
-    std::array<double,4> map_dimensions_meters()
+    std::array<double,4> map_dimensions_meters() const
     {
         return {m_x_min, m_x_max, m_y_min, m_y_max};
     }
@@ -212,14 +213,15 @@ protected:
     Eigen::VectorXd residual;                      // Residual vector (r = J*m_MAP_sol - y)
 
     // Util Functions
-    bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf);
-    double getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const;
+    bool check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf) const;
+    //double getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const;
+    double getLambdaValue(FactorType type, size_t cell_idx, size_t neighbor_cell_idx, double ux, double uy, double neighbor_ux, double neighbor_uy) const;
     void computeDistanceTransform();
     
-    void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y);
-    size_t cellxy2id(size_t cell_x, size_t cell_y);
+    void id2cellxy(size_t id, size_t& cell_x, size_t& cell_y) const;;
+    size_t cellxy2id(size_t cell_x, size_t cell_y) const;
     int xy2idx(float x, float y) const;
-    void id2xy(size_t id, double& x, double& y);
+    void id2xy(size_t id, double& x, double& y) const;
 
     // Visualization
     void save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout, std::vector<Eigen::Triplet<double>>& Aout, Eigen::VectorXd& yout);

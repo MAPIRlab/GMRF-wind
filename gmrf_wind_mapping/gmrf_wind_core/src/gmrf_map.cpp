@@ -114,18 +114,21 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
             id2cellxy(j, jx, jy);
 
 
-            if (!is_cell_free(j))
+            // --------------------------
+            // ---   REGULARIZATION   ---
+            // --------------------------
+            //if (!is_cell_free(j))
             {
                 // Force Wind estimation to be 0 (Damping) for numericall stability
                 {
                     // Wx(j) = 0
                     J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                    factor_types.push_back({count, FactorType::Diffusion, j});
+                    factor_types.push_back({count, FactorType::Regularization, j, j});
                     count++;
 
                     // Wy(j) = 0
                     J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                    factor_types.push_back({count, FactorType::Diffusion, j});
+                    factor_types.push_back({count, FactorType::Regularization, j, j});
                     count++;
                 }
             }
@@ -177,12 +180,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                             // Link Wx
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
                             J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
-                            factor_types.push_back({count, nb.type, j});
+                            factor_types.push_back({count, nb.type, j, nj});
                             count++;
                             // Link Wy
                             J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
                             J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
-                            factor_types.push_back({count, nb.type, j});
+                            factor_types.push_back({count, nb.type, j, nj});
                             count++;
                         }
                     }
@@ -262,7 +265,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                 // If factor is to be set...
                 if (set_divergence_free)
                 {
-                    factor_types.push_back({count, FactorType::MassConservation, j});
+                    factor_types.push_back({count, FactorType::MassConservation, j, j});
                     count++;
                     set_divergence_free = false;
                 }
@@ -314,12 +317,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                             // Smooth Wx
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
                             J.push_back(Eigen::Triplet<double>(count, nj, -1.0));
-                            factor_types.push_back({count, nb.type, j});
+                            factor_types.push_back({count, nb.type, j, nj});
                             count++;
                             // Smooth Wy
                             J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
                             J.push_back(Eigen::Triplet<double>(count, nj + N, -1.0));
-                            factor_types.push_back({count, nb.type, j});
+                            factor_types.push_back({count, nb.type, j, nj});
                             count++;
                         }
                     }
@@ -355,12 +358,12 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         if (dx_card[i] != 0) {
                             // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
                             J.push_back(Eigen::Triplet<double>(count, free_cell, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, free_cell});
+                            factor_types.push_back({count, FactorType::Obstacle, free_cell, free_cell});
                             count++;
                         } else {
                             // Vertical neighbor: Obstacle is above/below. Force Wy = 0
                             J.push_back(Eigen::Triplet<double>(count, free_cell + N, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, free_cell});
+                            factor_types.push_back({count, FactorType::Obstacle, free_cell, free_cell});
                             count++;
                         }
                     }
@@ -370,18 +373,18 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
                         if (dx_card[i] != 0) {
                             // Horizontal neighbor: Obstacle is to the side. Force Wx = 0
                             J.push_back(Eigen::Triplet<double>(count, j, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, j});
+                            factor_types.push_back({count, FactorType::Obstacle, j, j});
                             count++;
                             J.push_back(Eigen::Triplet<double>(count, nj, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, nj});
+                            factor_types.push_back({count, FactorType::Obstacle, nj, nj});
                             count++;
                         } else {
                             // Vertical neighbor: Obstacle is above/below. Force Wy = 0
                             J.push_back(Eigen::Triplet<double>(count, j + N, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, j});
+                            factor_types.push_back({count, FactorType::Obstacle, j, j});
                             count++;
                             J.push_back(Eigen::Triplet<double>(count, nj + N, 1.0));
-                            factor_types.push_back({count, FactorType::Obstacle, nj});
+                            factor_types.push_back({count, FactorType::Obstacle, nj, nj});
                             count++;
                         }
                     }
@@ -456,19 +459,19 @@ void CGMRF_map::read_lambdas(double &m_lambdaPrior_adv,
                         Cell index transformations
   ---------------------------------------------------------------*/
 // Get cell(x,y) in the GMRF representation from the general index in the array
-void CGMRF_map::id2cellxy(size_t id, size_t& cell_x, size_t& cell_y)
+void CGMRF_map::id2cellxy(size_t id, size_t& cell_x, size_t& cell_y) const
 {
     cell_x = id % m_size_x;
     cell_y = (size_t)floor(id / m_size_x);
 }
 
-size_t CGMRF_map::cellxy2id(size_t cell_x, size_t cell_y)
+size_t CGMRF_map::cellxy2id(size_t cell_x, size_t cell_y) const
 {
     return cell_x + cell_y * m_size_x;
 }
 
 // Get pose x,y (in meters) (in the GMRF representation) from the general index in the array
-void CGMRF_map::id2xy(size_t id, double& x, double& y)
+void CGMRF_map::id2xy(size_t id, double& x, double& y) const
 {
     size_t cell_x, cell_y;
     id2cellxy(id, cell_x, cell_y);
@@ -482,7 +485,7 @@ void CGMRF_map::id2xy(size_t id, double& x, double& y)
              Check if a cell is free of obstacles
   ---------------------------------------------------------------*/
 // Check at OccupancyMap level, if a cell is free of obstacles (checking the cell center at GMRF resolution)
-bool CGMRF_map::is_cell_free(size_t id_gmrf)
+bool CGMRF_map::is_cell_free(size_t id_gmrf) const
 {
     // The pose x,y (meters) of cell center
     double cell_1_x, cell_1_y;
@@ -524,7 +527,7 @@ bool CGMRF_map::is_cell_free(size_t id_gmrf)
     }
 }
 
-bool CGMRF_map::is_cell_boundary(size_t id_gmrf)
+bool CGMRF_map::is_cell_boundary(size_t id_gmrf) const
 {
     // Return true for cells at the borders of the map, which are considered as boundaries in CFD
     size_t cell_x, cell_y;
@@ -537,7 +540,7 @@ bool CGMRF_map::is_cell_boundary(size_t id_gmrf)
              Check cell interconnectivity
   ---------------------------------------------------------------*/
 // Check at OccupancyMap level, if two cells are interconnected, that is there exists no obstacles in between them.
-bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf)
+bool CGMRF_map::check_connectivity_between2cells(size_t idx_1_gmrf, size_t idx_2_gmrf) const
 {
     try
     {
@@ -702,56 +705,89 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 }
 
 
-/**
- * @brief Calculates the weight (Lambda) for a specific factor.
- * @param type The type of the factor (Advection, MassConservation, Obstacle, Regularization, etc.)
- * @param cell_idx The index of the primary cell associated with the factor.
- * @param ux Previous estimation of the X-component of the wind at cell_idx.
- * @param uy Previous estimation of the Y-component of the wind at cell_idx.
- * @return double The calculated weight (Lambda).
- */
-double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, double uy) const
+double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighbor_cell_idx, double ux, double uy, double neighbor_ux, double neighbor_uy) const
 {
-    // 1. Handle cases where a previous wind estimation is not available (Step 1)
-    // or magnitude is too low to determine a sensitive direction --> isotropic
-    double mag_sq = ux * ux + uy * uy;
-    double mag = std::sqrt(mag_sq);
-    double theta = atan2(uy, ux); // Current wind angle in radians
-
-    bool has_valid_direction = !std::isnan(ux) && !std::isnan(uy) && mag_sq > 1e-6;
-
-    // Helper to calculate anisotropic weight based on alignment with a unit vector (cos, sin)
-    auto calculate_anisotropic_weight = [&](double axis_x, double axis_y, bool is_diagonal) 
+    // Función auxiliar pura para calcular el peso direccional de UNA sola celda
+    auto calc_single_weight = [&](size_t c_idx, double u, double v, double axis_x, double axis_y) 
     {
-        if (!has_valid_direction) {
-            return 0.0; // Low wind: negligible advection
+        // Wind magnitude
+        double m_sq = u * u + v * v;
+        
+
+        // 1. Filter low wind magnitudes.
+        if (std::isnan(u) || std::isnan(v) || m_sq < 1e-6) {
+            return 0.0;
         }
 
-        // Project wind vector onto the connection axis: (W · Axis) / |W|
-        // We square the result to get the "alignment" factor [0, 1]
-        double dot_product = (ux * axis_x + uy * axis_y);
-        double alignment = std::abs(dot_product) / mag; // Cosine of the angle between wind and axis (absolute value)
+        // 2. Magnitude and directional alignment (cosine of the angle between wind and axis)
+        double m = std::sqrt(m_sq);
+        double dot_product = (u * axis_x + v * axis_y);
+        double alignment = std::abs(dot_product) / m; 
+
+        // 2. Smooth transition
+        double dir_weight = std::pow(alignment, 10);
+
+        // 3. RAYCASTING
+        int step_x = (axis_x > 0.1) ? 1 : ((axis_x < -0.1) ? -1 : 0);
+        int step_y = (axis_y > 0.1) ? 1 : ((axis_y < -0.1) ? -1 : 0);
+
+        if (dot_product < 0) {
+            step_x = -step_x;
+            step_y = -step_y;
+        }
+
+        size_t cx, cy;
+        id2cellxy(c_idx, cx, cy);
+
+        int dist_fwd = 0;
+        int max_lookahead = 4;
+
+        for (int s = 1; s <= max_lookahead; s++) 
+        {
+            int nx = (int)cx + s * step_x;
+            int ny = (int)cy + s * step_y;
+
+            if (nx < 0 || nx >= (int)m_size_x || ny < 0 || ny >= (int)m_size_y) break;
+            if (!is_cell_free(cellxy2id(nx, ny))) break;
+            
+            dist_fwd++;
+        }
+
+        // 4. Spatial attenuation based on forward free space
+        double k = 0.8;
+        double spatial_attenuation = 1.0 - std::exp(-k * dist_fwd);
+
+        return dir_weight * spatial_attenuation;
+    };
+    
+    auto calculate_symmetric_advection = [&](double axis_x, double axis_y) 
+    {
+        double weight_current = calc_single_weight(cell_idx, ux, uy, axis_x, axis_y);
+        double weight_neighbor = calc_single_weight(neighbor_cell_idx, neighbor_ux, neighbor_uy, axis_x, axis_y);
         
-        double weight = lambdaPrior_advection * pow(alignment,10);
-        return weight;
+        // Use max to account for upwind and downwind.
+        return lambdaPrior_advection * std::max(weight_current, weight_neighbor);
     };
 
     switch (type) 
     {
         case FactorType::AdvectionHoriz:
-            return calculate_anisotropic_weight(1.0, 0.0, false); // 0 deg
+            return calculate_symmetric_advection(1.0, 0.0);
         case FactorType::AdvectionVert:
-            return calculate_anisotropic_weight(0.0, 1.0, false); // 90 deg
+            return calculate_symmetric_advection(0.0, 1.0);
         case FactorType::AdvectionDiag1:
-            return calculate_anisotropic_weight(0.7071, 0.7071, true); // 45 deg
+            return calculate_symmetric_advection(0.7071, 0.7071);
         case FactorType::AdvectionDiag2:
-            return calculate_anisotropic_weight(-0.7071, 0.7071, true); // 135 deg
+            return calculate_symmetric_advection(-0.7071, 0.7071);
+            
         case FactorType::MassConservation: 
             return lambdaPrior_mass_conservation;
         case FactorType::Diffusion: 
-            return lambdaPrior_diffusion; // Isotropic regularization
+            return lambdaPrior_diffusion;
         case FactorType::Obstacle: 
             return lambdaPrior_obstacles;
+        case FactorType::Regularization:
+            return 0.0001;
         default: 
         {
             std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
@@ -759,7 +795,6 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, double ux, do
         }
     }
 }
-
 
 
 void CGMRF_map::computeDistanceTransform() 
@@ -868,7 +903,10 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             for (std::vector<FactorInfo>::iterator it = factor_types.begin(); it != factor_types.end(); ++it)
             {
                 // Get lambda value for the factor (type, cell_idx, and previous Wx,Wy wind estimation at cell_idx)          
-                double lambda_value = getLambdaValue(it->type, it->cell_idx, m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean);
+                double lambda_value = getLambdaValue(it->type, it->cell_idx, it->neighbor_cell_idx, 
+                    m_map[it->cell_idx].mean, m_map[it->cell_idx + N].mean,
+                    m_map[it->neighbor_cell_idx].mean, m_map[it->neighbor_cell_idx + N].mean
+                );
                 Eigen::Triplet<double> lambda_entry(it->row_idx, it->row_idx, lambda_value);
                 Lambda_temp.push_back(lambda_entry);
             }
@@ -1315,7 +1353,7 @@ int CGMRF_map::xy2idx(float x, float y) const
 }
 
 // Public wrapper to expose cell center coordinates for visualization utilities
-void CGMRF_map::id2xy_public(size_t id, double& x, double& y)
+void CGMRF_map::id2xy_public(size_t id, double& x, double& y) const
 {
     id2xy(id, x, y);
 }
