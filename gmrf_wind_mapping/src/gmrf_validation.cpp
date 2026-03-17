@@ -1256,14 +1256,19 @@ int main(int argc, char** argv)
         } // end loop N observations
         break;
     }
-    case 3:
+    case 3:     // Manual tunning of lambda parameters (dynamic reconfigure)
     {
-        // Manual tunning of lambda parameters (dynamic reconfigure)
-        
-        // a) Simulate N noisy random observations (wont change during the test)
+        // Simulate Observations   
         my_gmrf_map->SimulateFixedWindObservations();
-        //my_gmrf_map->SimulateWindObservations(50);
         
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        rclcpp::Rate rate(2);
         while (rclcpp::ok())
         {
             // Update Lambda values (from parameter server)
@@ -1284,8 +1289,14 @@ int main(int argc, char** argv)
             RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] AAE: %.2f rad, RMSE: %.2f m/s, ANSP: %.2f, ANLPD: %.2f", 
                         metrics[0], metrics[1], metrics[2], metrics[3]);
 
-            rclcpp::spin_some(my_gmrf_map);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            // rclcpp::spin_some(my_gmrf_map); --> Spin is handled in the background thread
+            rate.sleep();
+        }
+
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
         }
         break;
     }
