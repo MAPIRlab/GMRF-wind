@@ -707,14 +707,13 @@ void CGMRF_map::getObservationsIdx(std::vector<int>& obs_idx)
 
 double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighbor_cell_idx, double ux, double uy, double neighbor_ux, double neighbor_uy) const
 {
-    // Función auxiliar pura para calcular el peso direccional de UNA sola celda
-    auto calc_single_weight = [&](size_t c_idx, double u, double v, double axis_x, double axis_y) 
+    // Advection weight for single cell
+    auto calc_single_advective_weight = [&](size_t c_idx, double u, double v, double axis_x, double axis_y) 
     {
         // Wind magnitude
         double m_sq = u * u + v * v;
-        
 
-        // 1. Filter low wind magnitudes.
+        // 1. Filter low wind magnitudes. No wind -> No advection
         if (std::isnan(u) || std::isnan(v) || m_sq < 1e-6) {
             return 0.0;
         }
@@ -722,12 +721,18 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
         // 2. Magnitude and directional alignment (cosine of the angle between wind and axis)
         double m = std::sqrt(m_sq);
         double dot_product = (u * axis_x + v * axis_y);
-        double alignment = std::abs(dot_product) / m; 
+        double alignment = std::abs(dot_product) / m; // [0,1], where 1 means perfectly aligned and 0 means perpendicular]
 
+        // 0.9 = cos(25 degrees)
+        if (alignment < 0.9) {
+            return 0.0;
+        }
+        
         // 2. Smooth transition
-        double dir_weight = std::pow(alignment, 10);
-
-        // 3. RAYCASTING
+        double dir_weight = std::pow(alignment, 8);
+        
+        // 3. RAYCASTING: Look for obstacles in the forward direction of the wind
+        //----------------------------------------------------------
         int step_x = (axis_x > 0.1) ? 1 : ((axis_x < -0.1) ? -1 : 0);
         int step_y = (axis_y > 0.1) ? 1 : ((axis_y < -0.1) ? -1 : 0);
 
@@ -747,13 +752,24 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
             int nx = (int)cx + s * step_x;
             int ny = (int)cy + s * step_y;
 
-            if (nx < 0 || nx >= (int)m_size_x || ny < 0 || ny >= (int)m_size_y) break;
+            // Check bounds
+            if (nx < 0 || nx >= (int)m_size_x || ny < 0 || ny >= (int)m_size_y)
+            {
+                // Reached the edge of the map, but not obstacle (inlet/outlet)
+                dist_fwd = max_lookahead; // No attenuation
+                break;
+            }
+
             if (!is_cell_free(cellxy2id(nx, ny))) break;
             
             dist_fwd++;
         }
 
         // 4. Spatial attenuation based on forward free space
+        //if (dist_fwd < max_lookahead) 
+        //    return 0.0; // No free space ahead -> no advection
+
+        // Smooth transition: The more free space in the forward direction, the stronger the advection prior.
         double k = 0.8;
         double spatial_attenuation = 1.0 - std::exp(-k * dist_fwd);
 
@@ -762,8 +778,8 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
     
     auto calculate_symmetric_advection = [&](double axis_x, double axis_y) 
     {
-        double weight_current = calc_single_weight(cell_idx, ux, uy, axis_x, axis_y);
-        double weight_neighbor = calc_single_weight(neighbor_cell_idx, neighbor_ux, neighbor_uy, axis_x, axis_y);
+        double weight_current = calc_single_advective_weight(cell_idx, ux, uy, axis_x, axis_y);
+        double weight_neighbor = calc_single_advective_weight(neighbor_cell_idx, neighbor_ux, neighbor_uy, axis_x, axis_y);
         
         // Use max to account for upwind and downwind.
         return lambdaPrior_advection * std::max(weight_current, weight_neighbor);
@@ -885,6 +901,7 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
         // ITERATIVE PICARD-LIKE APPROACH TO UPDATE LAMBDA
         // -----------------------------------------
         double prev_weighted_residual_norm = std::numeric_limits<double>::max();
+        bool converged = false;
         for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
             // 2. Setup the prior part of Jacobian (fixed)
@@ -1067,9 +1084,9 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             // 7. Update GMRF values from current iteration solution (MAP estimation)
             for (size_t j = 0; j < m_map.size(); j++)
             {
-                m_map[j].mean = m_MAP_sol(j);   // Can be iterative (if advection prior is used)
-                m_map[j].var = 0.0;             // Not estimated yet.
-                m_map[j].covariance = 0.0;      // Not estimated yet.
+                // Under-relaxation update to improve convergence stability: new_mean = alpha * new_estimate + (1-alpha) * old_mean
+                double alpha = 0.5; // Relaxation factor (0 < alpha <= 1)
+                m_map[j].mean = alpha * m_MAP_sol(j) + (1 - alpha) * m_map[j].mean;
             }
 
             // 8. Residual Vector (r = J*m - y)
@@ -1083,12 +1100,18 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             // Check convergence based on relative change in weighted residual norm
             double rel_change = std::abs(prev_weighted_residual_norm - weighted_residual_norm) / prev_weighted_residual_norm;
             if (rel_change < 1e-3) {
-                if (verbose) std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
+                std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
+                converged = true;
                 break;
             }
             prev_weighted_residual_norm = weighted_residual_norm;
 
         }   //end of Picard iterations
+
+        if (!converged) {
+            std::cerr << "--> MAP did not converge after " << m_picard_iterations << " iterations." << std::endl;
+            std::cerr << "Final weighted residual norm: " << prev_weighted_residual_norm << std::endl;
+        }
 
         if (estimateTiming)
         {
