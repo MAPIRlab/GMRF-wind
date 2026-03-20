@@ -43,7 +43,7 @@ public:
 
     void update();
     void publishMaps();
-    std::array<double, 4> compute_performance_metrics() const;
+    std::vector<double> compute_performance_metrics(const std::string& metric) const;
     void SimulateWindObservations(size_t N_obs);
     void SimulateFixedWindObservations();
     void clearEstimation();
@@ -79,41 +79,27 @@ public:
 
         // 4. Run MAP estimation and uncertainty computation (when needed)
         gmrf_map->MAP_estimation_GMRF(num_iterations_MAP);
-        if (optimization_metric == "anlpd")
+        if (optimization_metric == "NLPD" || optimization_metric == "ANLPD")
             gmrf_map->computeUncertainty_GMRF();
-
-        // 5. Compute performance metrics (AAE, RMSE, ANSP, ANLPD)
-        std::array<double, 4> metrics = this->compute_performance_metrics();
-        double res_AAE = metrics[0];  // AAE (Average Angular Error) [0,1] --> 0 is the best.
-        double res_RMSE = metrics[1]; // RMSE (Root Mean Square Error) [0,inf) --> 0 is the best.
-        double res_ANSP = (1-metrics[2]); // ANSP [-1,1] (Average Normalized Scalar Product) --> [0,2] where 0 is the best.
-        double res_ANLPD = metrics[3] + 20; // ANLPD (Average Negative Log Predictive Density) --> adding offset to allow negative values
-
         
-        // Metric to minimize (residual for optimization)
-        if (optimization_metric == "aae")
-            residual[0] = static_cast<T>(res_AAE);
-        else if (optimization_metric == "rmse")
-            residual[0] = static_cast<T>(res_RMSE);
-        else if (optimization_metric == "ansp")
-        {
-            // check
-            if (std::isnan(res_ANSP) || std::isinf(res_ANSP)) {
-                std::cerr << "Numerical instability detected in ANSP: " << res_ANSP << std::endl;
-                return false; // Indica a Ceres que reduzca el tamaño del paso
-            }
-            residual[0] = static_cast<T>(res_ANSP);
-            //std::cerr << "ANSP: " << metrics[2] << std::endl;
+        // 5. Residuals for optimization (per-cell) or average metric (single value)
+        std::vector<double> selected_residuals = this->compute_performance_metrics(optimization_metric);
+        if (selected_residuals.empty()) {
+            std::cerr << "Error: compute_performance_metrics returned empty residuals." << std::endl;
+            return false; 
         }
-        else if (optimization_metric == "anlpd")
+
+        // 6. Fill the Ceres residual array
+        for (size_t i = 0; i < selected_residuals.size(); ++i)
         {
-            // check
-            if (std::isnan(res_ANLPD) || std::isinf(res_ANLPD)) {
-                std::cerr << "Numerical instability detected in ANPD: " << res_ANLPD << std::endl;
-                return false; // Indica a Ceres que reduzca el tamaño del paso
+            if (std::isnan(selected_residuals[i]) || std::isinf(selected_residuals[i])) 
+            {
+                std::cerr << "[CERES ABORT] MAP Solver yielded NaN at residual " << i 
+                            << ". Alphas: [" << alpha[0] << ", " << alpha[1] << ", " 
+                            << alpha[2] << ", " << alpha[3] << "]\n";
+                return false; // Tell Ceres this step caused numerical instability
             }
-            residual[0] = static_cast<T>(res_ANLPD);
-            //std::cerr << "ANLPD: " << metrics[3] << std::endl;
+            residual[i] = static_cast<T>(selected_residuals[i]);
         }
 
         return true;
@@ -134,6 +120,7 @@ public:
     std::unique_ptr<CGMRF_map> gmrf_map;        // The GMRF Map being estimated
     std::vector<WindVectorXY> gt_map;           // GT wind map from CFD data
     nav_msgs::msg::OccupancyGrid occupancy_map; // Occupancy GridMap of the environment
+    std::vector<int> free_cell_indices;         // List of free cell indices for faster iteration (used in estimation and metrics computation)
 
     // Node Parameters
     std::string mapFilePath;    // Path to the map image file (grayscale) to use as occupancy map
@@ -149,7 +136,8 @@ public:
     double observation_var_wind_direction;     // Variance of the wind direction measurement (rad)^2
     int num_iterations_MAP;                    // Maximum number of iterations for the MAP estimation optimization
     int experiment_number;                     // Number of the experiment to run
-    
+    std::string optimization_metric;           // Metric to optimize when tuning the GMRF hyperparameters (lambda weights and observation variances). Options: "AE", "ME", "RSE", "NSP", "NLPD", "ME&AE"
+
     // Variables
     boost::mutex mutex_anemometer;
     boost::mutex mutex_position;
@@ -163,11 +151,27 @@ struct CostFunctor
     std::string optimization_metric;
     CostFunctor(Cvalgt* instance, const std::string metric) : gmrf_validation_node(instance), optimization_metric(metric) {}
     
+    // -------------------------------------------------------------------
+    // SIGNATURE 1: For DynamicNumericDiffCostFunction (Array of pointers)
+    // -------------------------------------------------------------------
     template <typename T>
-    // bool operator()(const T* const params, T* residual) const
+    bool operator()(T const* const* parameters, T* residual) const
+    {
+        // Unpack the parameter block array
+        const T* const alpha = parameters[0];
+        const T* const log_k = parameters[1];
+
+        // Delegate the work using the member variable 'optimization_metric'
+        return gmrf_validation_node->evaluate_cost(optimization_metric, alpha, log_k, residual);
+    }
+
+    // -------------------------------------------------------------------
+    // SIGNATURE 2: For standard NumericDiffCostFunction (Variadic args)
+    // -------------------------------------------------------------------
+    template <typename T>
     bool operator()(const T* const alpha, const T* const log_k, T* residual) const
     {
-        // Delegate the work to the class member function
+        // Delegate the work using the member variable 'optimization_metric'
         return gmrf_validation_node->evaluate_cost(optimization_metric, alpha, log_k, residual);
     }
 };
