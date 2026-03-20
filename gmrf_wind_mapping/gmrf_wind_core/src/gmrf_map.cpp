@@ -900,8 +900,9 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
         // -----------------------------------------
         // ITERATIVE PICARD-LIKE APPROACH TO UPDATE LAMBDA
         // -----------------------------------------
-        double prev_weighted_residual_norm = std::numeric_limits<double>::max();
+        //double prev_weighted_residual_norm = std::numeric_limits<double>::max();
         bool converged = false;
+        Eigen::VectorXd prev_map_state(2 * N);
         for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
             // 2. Setup the prior part of Jacobian (fixed)
@@ -1082,35 +1083,46 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 std::cerr <<  "[GMRF] system solved with solution size (" << m_MAP_sol.rows() << "," << m_MAP_sol.cols() << ")" << std::endl;
                        
             // 7. Update GMRF values from current iteration solution (MAP estimation)
+            Eigen::VectorXd current_map_state(2 * N);
             for (size_t j = 0; j < m_map.size(); j++)
             {
                 // Under-relaxation update to improve convergence stability: new_mean = alpha * new_estimate + (1-alpha) * old_mean
                 double alpha = 0.5; // Relaxation factor (0 < alpha <= 1)
                 m_map[j].mean = alpha * m_MAP_sol(j) + (1 - alpha) * m_map[j].mean;
+                current_map_state(j) = m_map[j].mean;
             }
 
-            // 8. Residual Vector (r = J*m - y)
-            residual = Jsparse * m_MAP_sol - y_temp;
-            // Calculate the norm of the residual with the Asparse weights: sqrt(r' * A * r)
-            double weighted_residual_norm = sqrt(residual.transpose() * Asparse * residual);
+            if (iter > 0)
+            {
+                // Calculate L2 norm of the difference between current and previous state
+                double state_diff_norm = (current_map_state - prev_map_state).norm();
+                double state_norm = current_map_state.norm();
+                
+                // Protect against division by zero
+                double rel_change = state_diff_norm / (state_norm + 1e-9);
 
-            if (verbose)
-                std::cerr << "[GMRF] MAP estimated --> Picard iteration: " << iter+1 << ". Weighted residual norm: " << weighted_residual_norm << std::endl;
-            
-            // Check convergence based on relative change in weighted residual norm
-            double rel_change = std::abs(prev_weighted_residual_norm - weighted_residual_norm) / prev_weighted_residual_norm;
-            if (rel_change < 1e-3) {
-                std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
-                converged = true;
-                break;
+                if (verbose)
+                    std::cerr << "[GMRF] MAP estimated --> Picard iteration: " << iter+1 
+                              << ". Relative state change: " << rel_change << std::endl;
+
+                if (std::isnan(rel_change) || rel_change > 1e10) {
+                    std::cerr << "--> MAP Diverged (Numerical Explosion) at iteration " << iter << std::endl;
+                    converged = false;
+                    break;
+                }
+
+                if (rel_change < 1e-3) {
+                    std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
+                    converged = true;
+                    break;
+                }
             }
-            prev_weighted_residual_norm = weighted_residual_norm;
+            prev_map_state = current_map_state;
 
         }   //end of Picard iterations
 
         if (!converged) {
             std::cerr << "--> MAP did not converge after " << m_picard_iterations << " iterations." << std::endl;
-            std::cerr << "Final weighted residual norm: " << prev_weighted_residual_norm << std::endl;
         }
 
         if (estimateTiming)
