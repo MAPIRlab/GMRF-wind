@@ -168,7 +168,7 @@ void Cvalgt::initialize()
     gmrf_map = std::make_unique<CGMRF_map>(occMap, 
                                         params,
                                         verbose,
-                                        true // estimateTiming
+                                        false // estimateTiming
                                         );
     gmrf_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
@@ -350,9 +350,17 @@ void Cvalgt::SimulateFixedWindObservations()
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     double N = dimensions.x()*dimensions.y() - 1;
     std::vector<size_t> observation_indices;
-    for (size_t i = 320; i <= 460; i+=35) // Take one observation every 50 cells
-        observation_indices.push_back(i);
 
+    // Inlet
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Inlet.");
+    for (size_t row = 11; row <= 14; ++row)
+    {
+        size_t i = row * dimensions.x() + 2; // First column (inlet)
+        observation_indices.push_back(i);
+    }
+
+
+    // Create observations in the GMRF map from the GT map
     for (size_t idx : observation_indices)
     {
         // Ensure index is within bounds of the GT map
@@ -724,23 +732,23 @@ std::array<double,4> Cvalgt::compute_performance_metrics() const
 
         // Average Angular Error
         double AAE = sum_AE / N;
-        if (true)
+        if (verbose)
             RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average Angular Error (rad) = %.2f", AAE);
 
         // RMSE & NRMSE
         double RMSE = std::sqrt(sum_squared_error / N);
         double NRMSE = RMSE / ( sum_gt_magnitudes / N);
-        if (true)
+        if (verbose)
             RCLCPP_INFO(this->get_logger(), "[gmrf-validation] RMSE (m/s)= %.2f", RMSE);
 
         // Normalized Scalar Product
         double ANSP = sum_normalized_scalar_products / N;
-        if (true)
+        if (verbose)
             RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average Normalized Scalar Product = %.2f", ANSP);
 
         // Average NLPD
         double ANLPD = sum_NLPD / N;
-        if (true)
+        if (verbose)
             RCLCPP_INFO(this->get_logger(), "[gmrf-validation] Average NLPD = %.2f", ANLPD);
 
         return {AAE, RMSE, ANSP, ANLPD};
@@ -869,6 +877,30 @@ Stats calculate_stats(const std::vector<double>& data)
     return {mean, variance, std_dev};
 }
 
+
+// Generates an LHS matrix of size [num_samples x num_dims]
+std::vector<std::vector<double>> generateLHS(int num_samples, int num_dims, double min_val, double max_val, int seed = 42) {
+    std::vector<std::vector<double>> lhs(num_samples, std::vector<double>(num_dims));
+    std::default_random_engine generator(seed);
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+
+    double interval_size = (max_val - min_val) / num_samples;
+
+    for (int d = 0; d < num_dims; ++d) {
+        // Create an ordered list of intervals and shuffle them
+        std::vector<int> intervals(num_samples);
+        std::iota(intervals.begin(), intervals.end(), 0);
+        std::shuffle(intervals.begin(), intervals.end(), generator);
+
+        for (int s = 0; s < num_samples; ++s) {
+            // Pick a random point within the assigned interval
+            double random_offset = dist(generator) * interval_size;
+            lhs[s][d] = min_val + (intervals[s] * interval_size) + random_offset;
+        }
+    }
+    return lhs;
+}
+
 //-----------------------------------------------------------------------------
 //                                    MAIN
 //----------------------------------------------------------------------------
@@ -890,64 +922,29 @@ int main(int argc, char** argv)
     switch (my_gmrf_map->experiment_number)
     {
     case 1: //Optimize Lambda parameters (scenario, wind, Nobs)
-    {
-        // Parameters        
-        double alpha[4] = {0.0, 0.0, 0.0, 0.0};     // alpha = 0 --> e^0 = 1, all lambda will start at 1/4
-        double log_k[1] = {0.0};                    // log_k = 0 --> k = 1.0
-                
+    {        
+        // CERES configuration
         // ===================================================================
         // PHASE 1: ANSP (structural optimization of the GMRF)
         // ===================================================================
-        // CERES configuration
         ceres::Solver::Options options1;
         options1.linear_solver_type = ceres::DENSE_QR;
         options1.max_num_iterations = 100;
         options1.use_nonmonotonic_steps = true; // Using a non-monotonic steps can help "jump" over small ridges
         options1.minimizer_progress_to_stdout = false;
-        options1.function_tolerance = 1e-3;
-        options1.parameter_tolerance = 1e-2;
-
-        // CERES problem
-        ceres::Problem problem_phase1;
-        ceres::CostFunction* cost_function1 =
-            new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
-                new CostFunctor(my_gmrf_map.get(), "ansp")
-            );
-        problem_phase1.AddResidualBlock(cost_function1, nullptr, alpha, log_k);
-        // Set fixed and varable parameters for this phase
-        problem_phase1.SetParameterBlockVariable(alpha);  // Ensure alphas are variables in this phase
-        problem_phase1.SetParameterBlockConstant(log_k);  // Keep k constant in this phase to focus on optimizing alphas
-        // Dock one alpha parameter to avoid scale ambiguity (only optimize 3 alphas)
-        std::vector<int> constant_alpha_indices;
-        constant_alpha_indices.push_back(2); // Fix alpha_diffusion to 0 (lambda_diffusion = k*e^0 = k) and optimize the relative importance of the other lambdas with respect to diffusion
-        ceres::SubsetManifold* alpha_parameterization = 
-            new ceres::SubsetManifold(4, constant_alpha_indices);
-        problem_phase1.SetManifold(alpha, alpha_parameterization);
-
+        options1.function_tolerance = 1e-6;
+        options1.parameter_tolerance = 1e-5;
 
         // ===================================================================
         // PHASE 2: NLPD (log_k) uncertainty-aware optimization of the GMRF
         // ===================================================================
-        // CERES configuration
         ceres::Solver::Options options2;
         options2.linear_solver_type = ceres::DENSE_QR;
         options2.max_num_iterations = 100;
         options2.use_nonmonotonic_steps = true; // Using a non-monotonic steps can help "jump" over small ridges
         options2.minimizer_progress_to_stdout = false;
-        options2.function_tolerance = 1e-4;
-        options2.parameter_tolerance = 1e-3;
-
-        // CERES problem
-        ceres::Problem problem_phase2;
-        ceres::CostFunction* cost_function2 =
-            new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
-                new CostFunctor(my_gmrf_map.get(), "nlpd")
-            );
-        problem_phase2.AddResidualBlock(cost_function2, nullptr, alpha, log_k);
-        // Set fixed and varable parameters for this phase
-        problem_phase2.SetParameterBlockConstant(alpha);    // Keep alphas constant in this phase to focus on optimizing k
-        problem_phase2.SetParameterBlockVariable(log_k);    // Ensure log_k is variable in this phase
-
+        options2.function_tolerance = 1e-6;
+        options2.parameter_tolerance = 1e-5;
 
         //=========================================
         // LOOP - NUM OBSERVATIONS
@@ -973,54 +970,95 @@ int main(int argc, char** argv)
             //=========================================
             for (int repeat = 0; repeat < 20; ++repeat)
             {
+                std::cerr << "---- Repetition " << repeat << " ----\n";
                 // 1. Clear previous estimation (important to avoid bias in the optimization)
                 my_gmrf_map->clearEstimation();
 
                 // 2. Simulate N (random) observations (also clears previous observations)
                 my_gmrf_map->SimulateWindObservations(i);
 
-                // 3. Initial values
-                alpha[0] = 0.0; // advection
-                alpha[1] = 0.0; // mass conservation
-                alpha[2] = 0.0; // diffusion (reference)
-                alpha[3] = 0.0; // obstacles
-                log_k[0] = 0.0; // k
+                // 3. Reset parameters for this specific run
+                double alpha[4] = {1.0, 1.0, 0.0, 1.0};
+                double log_k[1] = {std::log(1/my_gmrf_map->observation_var_wind_speed)}; // Start with a k that makes the lambdas similar to the observation variance (so that the GMRF is not too far from the observations at the beginning of the optimization)
 
-                // 4. PHASE1 SOLVER - ANSP
-                std::cerr << "\n--- OPT PHASE 1 (ANSP) ---\n";
+                //-------------------
+                // 4. PHASE-1: ANSP
+                //--------------------
+                ceres::Problem problem_phase1;
+                ceres::CostFunction* cost_function1 =
+                    new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
+                        new CostFunctor(my_gmrf_map.get(), "ansp")
+                    );
+                problem_phase1.AddResidualBlock(cost_function1, nullptr, alpha, log_k);
+                // Set fixed and varable parameters for this phase
+                problem_phase1.SetParameterBlockVariable(alpha);  // Ensure alphas are variables in this phase
+                problem_phase1.SetParameterBlockConstant(log_k);  // Keep k constant in this phase to focus on optimizing alphas
+                // Dock one alpha parameter to avoid scale ambiguity (only optimize 3 alphas)
+                std::vector<int> constant_alpha_indices;
+                constant_alpha_indices.push_back(2); // Fix alpha_diffusion to 0 (lambda_diffusion = k*e^0 = k) and optimize the relative importance of the other lambdas with respect to diffusion
+#if CERES_VERSION_MAJOR >= 2 && CERES_VERSION_MINOR >= 2
+                ceres::SubsetManifold* alpha_parameterization =
+                    new ceres::SubsetManifold(4, constant_alpha_indices);
+                problem_phase1.SetManifold(alpha, alpha_parameterization);
+#else
+                ceres::SubsetParameterization* alpha_parameterization =
+                    new ceres::SubsetParameterization(4, constant_alpha_indices);
+                problem_phase1.SetParameterization(alpha, alpha_parameterization);
+#endif
                 ceres::Solver::Summary summary1;
                 ceres::Solve(options1, &problem_phase1, &summary1);
-                //std::cerr << summary1.BriefReport() << "\n";
+                std::cerr << summary1.BriefReport() << "\n";
 
-                // 5. PHASE2 SOLVER - NLPD
-                std::cerr << "\n--- OPT PHASE 2 (ANLPD) ---\n";
+                //--------------------
+                // 5. PHASE-2: NLPD
+                //--------------------
+                ceres::Problem problem_phase2;
+                ceres::CostFunction* cost_function2 =
+                    new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
+                        new CostFunctor(my_gmrf_map.get(), "anlpd")
+                    );
+                problem_phase2.AddResidualBlock(cost_function2, nullptr, alpha, log_k);
+                // Set fixed and varable parameters for this phase
+                problem_phase2.SetParameterBlockConstant(alpha);    // Keep alphas constant in this phase to focus on optimizing k
+                problem_phase2.SetParameterBlockVariable(log_k);    // Ensure log_k is variable in this phase
+                problem_phase2.SetParameterLowerBound(log_k, 0, -5.0);  // Min log_k = -5 --> k = 0.0067 (very small lambdas) 
+                problem_phase2.SetParameterUpperBound(log_k, 0, 5.0);   // Max log_k = 5 --> k = 148.4 (very large lambdas)
+
                 ceres::Solver::Summary summary2;
                 ceres::Solve(options2, &problem_phase2, &summary2);
-                //std::cerr << summary2.BriefReport() << "\n";
+                std::cerr << summary2.BriefReport() << "\n";
                 
+                if (!summary1.IsSolutionUsable() || !summary2.IsSolutionUsable())
+                {
+                    std::cerr << "[WARNING] Optimización inestable en la repetición " 
+                              << repeat << ". Descartando resultados para evitar outliers.\n";
+                    continue; 
+                }
+
                 // 6. Optimized Results
                 double final_k = std::exp(log_k[0]);
                 double sum_exp = std::exp(alpha[0]) + std::exp(alpha[1]) + std::exp(alpha[2]) + std::exp(alpha[3]);
                 double lambda[4];
-                for (int i = 0; i < 4; ++i)
-                    lambda[i] = final_k * (std::exp(alpha[i]) / sum_exp);                                
+                for (int i = 0; i < 4; ++i){
+                    lambda[i] = final_k * (std::exp(alpha[i]) / sum_exp);
+                }
                 
+                // 7. Make sure uncertainty is computed one last time with final values
+                my_gmrf_map->update_lambdas(lambda[0], lambda[1], lambda[2], lambda[3]);
+                my_gmrf_map->update();
+
                 // 7. Performance metrics (optimal values)
                 std::array<double, 4> metrics = my_gmrf_map->compute_performance_metrics();
-                double AAE_opt = metrics[0];
-                double RMSE_opt = metrics[1];
-                double ANSP_opt = metrics[2];
-                double NLPD_opt = metrics[3];
                 
                 // 8. Append results to the CSV file
                 std::ofstream file_append(filename_lambda, std::ios::app);
                 if (file_append.is_open()) 
                 {
                     file_append << repeat << "," 
-                                << AAE_opt << "," 
-                                << RMSE_opt << "," 
-                                << ANSP_opt << "," 
-                                << NLPD_opt << "," 
+                                << metrics[0] << "," 
+                                << metrics[1] << "," 
+                                << metrics[2] << "," 
+                                << metrics[3] << "," 
                                 << lambda[0] << "," 
                                 << lambda[1] << ","
                                 << lambda[2] << ","
@@ -1034,39 +1072,216 @@ int main(int argc, char** argv)
         break;
     }
 
-    case 2:
-    {
-        // Simple GMRF estimation with fixed Lambdas
-        // =========================================
-        // Initial values for the Lambda precision parameters (from ROS2 params)
-        double parameters[4] = {my_gmrf_map->GMRF_lambdaPrior_advection,
-                                my_gmrf_map->GMRF_lambdaPrior_mass_conservation,
-                                my_gmrf_map->GMRF_lambdaPrior_diffusion,
-                                my_gmrf_map->GMRF_lambdaPrior_obstacles,
-                                };
-        my_gmrf_map->update_lambdas(parameters[0], parameters[1], parameters[2], parameters[3]);
+    case 2: //Optimize Lambda parameters (Fixed Observations -> Inlets)
+    {        
+        // CERES configuration
+        // ===================================================================
+        // PHASE 1: ANSP (structural optimization of the GMRF)
+        // ===================================================================
+        ceres::Solver::Options options1;
+        options1.linear_solver_type = ceres::DENSE_QR;
+        options1.max_num_iterations = 100;
+        options1.use_nonmonotonic_steps = true; // Using a non-monotonic steps can help "jump" over small ridges
+        options1.minimizer_progress_to_stdout = false;
+        options1.function_tolerance = 1e-6;
+        options1.parameter_tolerance = 1e-5;
 
-        // Simulate N noisy random observations (wont change during the test)
-        my_gmrf_map->SimulateFixedWindObservations();
-        //my_gmrf_map->SimulateWindObservations(50);
+        // ===================================================================
+        // PHASE 2: NLPD (log_k) uncertainty-aware optimization of the GMRF
+        // ===================================================================
+        ceres::Solver::Options options2;
+        options2.linear_solver_type = ceres::DENSE_QR;
+        options2.max_num_iterations = 100;
+        options2.use_nonmonotonic_steps = true; // Using a non-monotonic steps can help "jump" over small ridges
+        options2.minimizer_progress_to_stdout = false;
+        options2.function_tolerance = 1e-6;
+        options2.parameter_tolerance = 1e-5;
 
-        // Perform MAP + Uncertainty estimation
-        my_gmrf_map->update();
+        // ===================================================================
+        // PRE-COMPUTE LATIN HYPERCUBE SAMPLES (coarse grid search for good initializations of the optimization)
+        // ===================================================================
+        int num_repetitions = 200;
+        // We explore bounds [-3.0, 3.0] to get a wide variety of initializations.
+        std::vector<std::vector<double>> lhs_samples = generateLHS(num_repetitions, 3, -3.0, 3.0, 12345);
 
-        // Save file with num_iterations and lambda values
-        std::string file_name = "gmrf_estimation_" + std::to_string(my_gmrf_map->num_iterations_MAP) + "_iters.csv";
-        my_gmrf_map->saveGMRFEstimationToCSV(file_name);
+        //=========================================
+        // LOOP - NUM OBSERVATIONS
+        //=========================================
+        for (int i = 6; i <= 6 ; i += 1) 
+        {
+            std::cerr << "================== Optimizing for N_obs = " << i << " ==================\n";
 
+            // Save to CSV file
+            std::string filename_lambda = "Lambda_values_" + std::to_string(i) + "_obs.csv";
+            std::ofstream file_lambda(filename_lambda);
+            if (file_lambda.is_open()) 
+            {
+                // Header
+                file_lambda << "Repetition,AAE,RMSE,ANSP,ANLPD,Lambda_Advection,Lambda_Mass,Lambda_Diffusion,Lambda_Obstacles\n";
+                file_lambda.close();
+            } else {
+                std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
+            }
+
+            //=========================================
+            // LOOP - M TIMES (different initializations)
+            //=========================================
+            for (int repeat = 0; repeat < num_repetitions; ++repeat)
+            {
+                std::cerr << "---- Repetition " << repeat << " ----\n";
+                // 1. Clear previous estimation (important to avoid bias in the optimization)
+                my_gmrf_map->clearEstimation();
+
+                // 2. Simulate fixed observations (inlets)
+                my_gmrf_map->SimulateFixedWindObservations();
+
+                // 3. Initialize parameters for this specific run
+                std::string initi_mode = "LHS"; // "LHS" for Latin Hypercube Sampling, "random", "fixed"
+                double alpha[4];
+                double log_k[1]; 
+
+                if (initi_mode == "random")
+                {
+                    // Randomize initial alpha and log_k for each repetition
+                    std::default_random_engine generator(repeat); // Seed with repetition number for reproducibility
+                    std::normal_distribution<double> distribution(0.0, 0.25); // mean=0, stddev=0.25
+                    for (int j = 0; j < 4; ++j)
+                        alpha[j] = distribution(generator);
+                    alpha[2] = 0.0; // Keep alpha_diffusion fixed at 0 for all repetitions to maintain the same reference scale for the other lambdas
+                    log_k[0] = std::log(1/my_gmrf_map->observation_var_wind_speed);
+                }
+                else if (initi_mode == "LHS")
+                {
+                    // Use Latin Hypercube Sampling for initialization
+                    alpha[0] = lhs_samples[repeat][0];
+                    alpha[1] = lhs_samples[repeat][1];
+                    alpha[2] = 0.0; 
+                    alpha[3] = lhs_samples[repeat][2]; 
+                    log_k[0] = std::log(1/my_gmrf_map->observation_var_wind_speed);
+                }
+                else
+                {
+                    // Fixed initialization (same for all repetitions)
+                    alpha[0] = 1.0; // alpha_advection
+                    alpha[1] = 1.0; // alpha_mass
+                    alpha[2] = 0.0; // alpha_diffusion (reference)
+                    alpha[3] = 1.0; // alpha_obstacles
+                    log_k[0] = std::log(1/my_gmrf_map->observation_var_wind_speed);
+                }
+
+                //-------------------
+                // 4. PHASE-1: ANSP
+                //--------------------
+                ceres::Problem problem_phase1;
+                ceres::CostFunction* cost_function1 =
+                    new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
+                        new CostFunctor(my_gmrf_map.get(), "ansp")
+                    );
+                problem_phase1.AddResidualBlock(cost_function1, nullptr, alpha, log_k);
+                // Set fixed and varable parameters for this phase
+                problem_phase1.SetParameterBlockVariable(alpha);  // Ensure alphas are variables in this phase
+                problem_phase1.SetParameterBlockVariable(log_k); 
+                //problem_phase1.SetParameterBlockConstant(log_k);  // Keep k constant in this phase to focus on optimizing alphas
+                
+                // Dock one alpha parameter to avoid scale ambiguity (only optimize 3 alphas)
+                std::vector<int> constant_alpha_indices;
+                constant_alpha_indices.push_back(2); // Fix alpha_diffusion to 0 (lambda_diffusion = k*e^0 = k) and optimize the relative importance of the other lambdas with respect to diffusion
+#if CERES_VERSION_MAJOR >= 2 && CERES_VERSION_MINOR >= 2
+                ceres::SubsetManifold* alpha_parameterization =
+                    new ceres::SubsetManifold(4, constant_alpha_indices);
+                problem_phase1.SetManifold(alpha, alpha_parameterization);
+#else
+                ceres::SubsetParameterization* alpha_parameterization =
+                    new ceres::SubsetParameterization(4, constant_alpha_indices);
+                problem_phase1.SetParameterization(alpha, alpha_parameterization);
+#endif
+
+                problem_phase1.SetParameterLowerBound(alpha, 0, -5.0); // Límite inferior
+                problem_phase1.SetParameterUpperBound(alpha, 0, 5.0);  // Límite superior
+
+                ceres::Solver::Summary summary1;
+                ceres::Solve(options1, &problem_phase1, &summary1);
+                std::cerr << summary1.BriefReport() << "\n";
+
+                if (false)
+                {
+                    //--------------------
+                    // 5. PHASE-2: NLPD
+                    //--------------------
+                    ceres::Problem problem_phase2;
+                    ceres::CostFunction* cost_function2 =
+                        new ceres::NumericDiffCostFunction<CostFunctor, ceres::CENTRAL, 1, 4, 1>(
+                            new CostFunctor(my_gmrf_map.get(), "anlpd")
+                        );
+                    problem_phase2.AddResidualBlock(cost_function2, nullptr, alpha, log_k);
+                    // Set fixed and varable parameters for this phase
+                    problem_phase2.SetParameterBlockConstant(alpha);    // Keep alphas constant in this phase to focus on optimizing k
+                    problem_phase2.SetParameterBlockVariable(log_k);    // Ensure log_k is variable in this phase
+                    problem_phase2.SetParameterLowerBound(log_k, 0, -5.0);  // Min log_k = -5 --> k = 0.0067 (very small lambdas) 
+                    problem_phase2.SetParameterUpperBound(log_k, 0, 5.0);   // Max log_k = 5 --> k = 148.4 (very large lambdas)
+
+                    ceres::Solver::Summary summary2;
+                    ceres::Solve(options2, &problem_phase2, &summary2);
+                    std::cerr << summary2.BriefReport() << "\n";
+                    
+                    if (!summary1.IsSolutionUsable() || !summary2.IsSolutionUsable())
+                    {
+                        std::cerr << "[WARNING] Optimización inestable en la repetición " 
+                                << repeat << ". Descartando resultados para evitar outliers.\n";
+                        continue; 
+                    }
+                }
+            
+
+                // 6. Optimized Results
+                double final_k = std::exp(log_k[0]);
+                double sum_exp = std::exp(alpha[0]) + std::exp(alpha[1]) + std::exp(alpha[2]) + std::exp(alpha[3]);
+                double lambda[4];
+                for (int i = 0; i < 4; ++i){
+                    lambda[i] = final_k * (std::exp(alpha[i]) / sum_exp);
+                }
+                
+                // 7. Make sure uncertainty is computed one last time with final values
+                my_gmrf_map->update_lambdas(lambda[0], lambda[1], lambda[2], lambda[3]);
+                my_gmrf_map->update();
+
+                // 7. Performance metrics (optimal values)
+                std::array<double, 4> metrics = my_gmrf_map->compute_performance_metrics();
+                
+                // 8. Append results to the CSV file
+                std::ofstream file_append(filename_lambda, std::ios::app);
+                if (file_append.is_open()) 
+                {
+                    file_append << repeat << "," 
+                                << metrics[0] << "," 
+                                << metrics[1] << "," 
+                                << metrics[2] << "," 
+                                << metrics[3] << "," 
+                                << lambda[0] << "," 
+                                << lambda[1] << ","
+                                << lambda[2] << ","
+                                << lambda[3] << "\n";
+                    file_append.close();
+                } else {
+                    std::cerr << "Error: No se pudo abrir el archivo para escribir." << std::endl;
+                }
+            } // end loop M times.
+        } // end loop N observations
         break;
     }
-    case 3:
+    case 3:     // Manual tunning of lambda parameters (dynamic reconfigure)
     {
-        // Manual tunning of lambda parameters (dynamic reconfigure)
-        
-        // a) Simulate N noisy random observations (wont change during the test)
+        // Simulate Observations   
         my_gmrf_map->SimulateFixedWindObservations();
-        //my_gmrf_map->SimulateWindObservations(50);
         
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        rclcpp::Rate rate(2);
         while (rclcpp::ok())
         {
             // Update Lambda values (from parameter server)
@@ -1076,15 +1291,25 @@ int main(int argc, char** argv)
             double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
             my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_obstacles);
 
-            // Estimate MAP
+            // Estimate MAP + Uncertainty
             my_gmrf_map->update();
             my_gmrf_map->publishMaps();
 
             // Compute performance metrics
             std::array<double, 4> metrics = my_gmrf_map->compute_performance_metrics();
             
-            rclcpp::spin_some(my_gmrf_map);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // Display metrics in the console
+            RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] AAE: %.2f rad, RMSE: %.2f m/s, ANSP: %.2f, ANLPD: %.2f", 
+                        metrics[0], metrics[1], metrics[2], metrics[3]);
+
+            // rclcpp::spin_some(my_gmrf_map); --> Spin is handled in the background thread
+            rate.sleep();
+        }
+
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
         }
         break;
     }
