@@ -44,7 +44,7 @@ public:
     void update();
     void publishMaps();
     std::vector<double> compute_performance_metrics(const std::string& metric) const;
-    void SimulateWindObservations(size_t N_obs);
+    void SimulateWindObservations(size_t N_obs, bool remove_old_observations);
     void SimulateFixedWindObservations();
     void clearEstimation();
     void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_obst);

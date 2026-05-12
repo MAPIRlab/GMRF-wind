@@ -21,6 +21,7 @@
 #include <random>
 #include <numeric>   // Required for std::inner_product
 #include <cmath>     // Required for mathematical operations
+#include <filesystem>
 
 using namespace std::placeholders;
 using namespace gmrfw;
@@ -174,7 +175,7 @@ void Cvalgt::initialize()
     gmrf_map = std::make_unique<CGMRF_map>(occMap, 
                                         params,
                                         verbose,
-                                        false // estimateTiming
+                                        true // estimateTiming
                                         );
     gmrf_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
@@ -370,15 +371,76 @@ void Cvalgt::SimulateFixedWindObservations()
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     double N = dimensions.x()*dimensions.y() - 1;
     std::vector<size_t> observation_indices;
-
-    // Inlet
-    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Inlet.");
+    
+    // Left vertical Inlet (10x6 scenarios)
+    /*
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at 10x6 Inlet.");
     for (size_t row = 11; row <= 14; ++row)
     {
-        size_t i = row * dimensions.x() + 2; // First column (inlet)
+        size_t i = row * dimensions.x() + 1;
         observation_indices.push_back(i);
     }
-
+    
+    */
+    // Exp_C scenario: Set all the 6 inlets/outlets
+    std::vector<int> activelets = {1, 2, 3, 4, 5 ,6};
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Exp_C Inlet.");
+    
+    // in/outlet 1 (top-left)
+    if (std::find(activelets.begin(), activelets.end(), 1) != activelets.end())
+    {
+        for (size_t col = 14; col <= 17; ++col)
+        {
+            size_t i = (dimensions.y() - 2) * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+   // in/outlet 2 (right-top)
+   if (std::find(activelets.begin(), activelets.end(), 2) != activelets.end())
+    {
+        for (size_t row = (dimensions.y()-8); row <= (dimensions.y()-4); ++row)
+        {
+            size_t i = row * dimensions.x() + dimensions.x()-2;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 3 (left-bottom)
+    if (std::find(activelets.begin(), activelets.end(), 3) != activelets.end())
+    {
+        for (size_t row = 11; row <= 14; ++row)
+        {
+             size_t i = row * dimensions.x() + 1;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 4 (right-middle)
+    if (std::find(activelets.begin(), activelets.end(), 4) != activelets.end())
+    {
+        for (size_t row = 14; row <= 17; ++row)
+        {
+            size_t i = row * dimensions.x() + dimensions.x()-2;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 5 (bottom-left)
+    if (std::find(activelets.begin(), activelets.end(), 5) != activelets.end())
+    {
+        for (size_t col = 5; col <= 10; ++col)
+        {
+            size_t i = 1 * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 6 (bottom-right)
+    if (std::find(activelets.begin(), activelets.end(), 6) != activelets.end())
+    {    
+        for (size_t col = 29; col <= 35; ++col)
+        {
+            size_t i = 1 * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+    
 
     // Create observations in the GMRF map from the GT map
     for (size_t idx : observation_indices)
@@ -414,7 +476,7 @@ void Cvalgt::SimulateFixedWindObservations()
 }
 
 
-void Cvalgt::SimulateWindObservations(size_t N_obs)
+void Cvalgt::SimulateWindObservations(size_t N_obs, bool remove_old_observations)
 {
     // 1. Setup Random Number Generator (RNG)
     // std::random_device provides a non-deterministic seed (best practice)
@@ -428,9 +490,16 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
     double N = dimensions.x()*dimensions.y() - 1;
     std::uniform_int_distribution<> distrib(0, N);
     
-    // Clear previous observations
-    gmrf_map->clearObservations_GMRF();
-    std::vector<size_t> observed_cells; // To keep track of which cells have been observed
+    // Clear previous observations if requested
+    if (remove_old_observations)
+    {
+        gmrf_map->clearObservations_GMRF();
+    }
+
+    // Avoid sampling the same cell multiple times
+    std::vector<int> observed_cells;
+    gmrf_map->getObservationsIdx(observed_cells);
+    
 
     // Add N random observations from the GT map
     for (size_t i = 0; i < N_obs; ++i)
@@ -449,7 +518,7 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
         {
             --i; // If cell is not free, we don't count this iteration and try again
             continue;
-        }
+        }        
         
         // Add to observed cells list
         observed_cells.push_back(idx);
@@ -1337,6 +1406,108 @@ int main(int argc, char** argv)
         }
         break;
     }
+    case 3:     //Increasing number of observations
+    {
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        // Set Lambda values (from parameter server)
+        double lambda_advection = my_gmrf_map->get_parameter("GMRF_lambdaPrior_advection").as_double();
+        double lambda_mass_conservation = my_gmrf_map->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+        double lambda_diffusion = my_gmrf_map->get_parameter("GMRF_lambdaPrior_diffusion").as_double();
+        double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+        my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_obstacles);
+
+        // Experiment folder
+        std::string experiment_folder = "experiment2";
+        std::filesystem::create_directories(experiment_folder);
+
+        int num_repetitions = 100;
+        for (int repeat = 0; repeat < num_repetitions; ++repeat)
+        {
+            // Clear GMRF estimation to avoid bias from previous runs
+            my_gmrf_map->clearEstimation();
+            bool clear_observations = true;
+
+            // Create repetition folder
+            std::string repetition_folder = experiment_folder + "/repetition_" + std::to_string(repeat);
+            std::filesystem::create_directories(repetition_folder);
+            
+            int num_observations = 0;
+            int max_observations = 200;
+            for (num_observations = 0; num_observations <= max_observations; num_observations += 5)
+            {
+                RCLCPP_INFO(my_gmrf_map->get_logger(), "================== Simulating %d Observations ==================", num_observations);
+                
+                // Add new Observations
+                my_gmrf_map->SimulateWindObservations(5, clear_observations);
+                clear_observations = false; // Only clear observations for the first batch
+                
+                // Estimate MAP + Uncertainty
+                my_gmrf_map->update();            
+
+                // Save GMRF estimation to CSV file
+                std::string filename_csv = repetition_folder + "/gmrf_estimation_expC_" + std::to_string(num_observations) + "_obs.csv";
+                my_gmrf_map->saveGMRFEstimationToCSV(filename_csv);
+                
+                // Compute performance metrics
+                std::vector<double> metrics = my_gmrf_map->compute_performance_metrics("AVERAGES");
+                
+                // Display metrics in the console
+                RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] AAE: %.2f rad, AME: %.2f rad, RMSE: %.2f m/s, ANSP: %.2f, ANLPD: %.2f", 
+                            metrics[0], metrics[1], metrics[2], metrics[3], metrics[4]);
+            }
+        }
+        
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
+        }
+        break;
+    }
+
+    case 4:     //Computational Time
+    {
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        // Set Lambda values (from parameter server)
+        double lambda_advection = my_gmrf_map->get_parameter("GMRF_lambdaPrior_advection").as_double();
+        double lambda_mass_conservation = my_gmrf_map->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+        double lambda_diffusion = my_gmrf_map->get_parameter("GMRF_lambdaPrior_diffusion").as_double();
+        double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+        my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_obstacles);
+       
+        int num_repetitions = 100;
+        for (int repeat = 0; repeat < num_repetitions; ++repeat)
+        {
+            // Clear GMRF estimation to avoid bias from previous runs
+            my_gmrf_map->clearEstimation();
+            
+            // Add new Observations
+            my_gmrf_map->SimulateWindObservations(60, true);
+                
+            // Estimate MAP + Uncertainty
+            my_gmrf_map->update();
+        }
+        
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
+        }
+        break;
+    }
+
     default:
         break;
     }
