@@ -761,10 +761,8 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
 
         size_t cx, cy;
         id2cellxy(c_idx, cx, cy);
-
         int dist_fwd = 0;
         int max_lookahead = 4;
-
         for (int s = 1; s <= max_lookahead; s++) 
         {
             int nx = (int)cx + s * step_x;
@@ -821,7 +819,7 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
         case FactorType::Obstacle: 
             return lambdaPrior_obstacles;
         case FactorType::Regularization:
-            return 0.0001;
+            return 0.000001;
         default: 
         {
             std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
@@ -910,7 +908,7 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             std::cerr << "[CGMRF-MAP] Starting MAP Estimation with " << m_picard_iterations << " Picard-like iterations..." << std::endl;
 
         if (estimateTiming)
-            meanTimer.start();
+            meanTimer.start();  // MAP timer
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
@@ -921,8 +919,12 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
         //double prev_weighted_residual_norm = std::numeric_limits<double>::max();
         bool converged = false;
         Eigen::VectorXd prev_map_state(2 * N);
+        TimeStats picardTimer; // Local timer for each iteration
         for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
+            if (estimateTiming)
+                picardTimer.start();
+
             // 2. Setup the prior part of Jacobian (fixed)
             std::vector<Eigen::Triplet<double>> J_temp;
             J_temp.reserve(J.size() + nObsFactors);
@@ -1112,6 +1114,13 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 current_map_state(j) = m_map[j].mean;
             }
 
+            if (estimateTiming) 
+            {
+                picardTimer.stop();
+                // Save the individual iteration time to file
+                saveTimingData("MAP_Iteration", N, iter + 1, picardTimer.getLastTimeMs());
+            }
+
             if (iter > 0)
             {
                 // Calculate L2 norm of the difference between current and previous state
@@ -1131,7 +1140,8 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                     break;
                 }
 
-                if (rel_change < 1e-3) {
+                // Check for convergence based on relative change in the map state
+                if (rel_change < 1e-2) {
                     std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
                     converged = true;
                     break;
@@ -1141,13 +1151,17 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
 
         } // end of Picard iterations
 
-        if (!converged) {
+
+        if (!converged && verbose) {
             std::cerr << "--> MAP did not converge after " << m_picard_iterations << " iterations." << std::endl;
         }
 
         if (estimateTiming)
         {
             meanTimer.stop(); // Stop Timer for Mean computation
+            // Save the total MAP time for this run
+            saveTimingData("MAP_Total", N, 0, meanTimer.getLastTimeMs());
+
             auto mean_time_ms = meanTimer.getMeanTimeMs();
             std::cerr << "[GMRF] MAP Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
         }
@@ -1190,6 +1204,8 @@ void CGMRF_map::computeUncertainty_GMRF()
 
             if (estimateTiming)
                 stdTimer.stop(); // Stop Timer for Uncertainty computation
+                // Save the total uncertainty time for this run
+                saveTimingData("Uncertainty_Total", N, -1, stdTimer.getLastTimeMs());
             return;
         }
 
@@ -1222,6 +1238,9 @@ void CGMRF_map::computeUncertainty_GMRF()
         if (estimateTiming)
         {
             stdTimer.stop(); // Stop Timer for Uncertainty computation
+            // Save the total uncertainty time for this run
+            saveTimingData("Uncertainty_Total", N, 0, stdTimer.getLastTimeMs());
+
             auto std_time_ms = stdTimer.getMeanTimeMs();
             std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
         }
@@ -1231,6 +1250,18 @@ void CGMRF_map::computeUncertainty_GMRF()
         std::cerr << "=============================================================" << std::endl;
         std::cerr << "[GMRF-computeUncertainty_GMRF] EXCEPTION: " << e.what() << std::endl;
         std::cerr << "=============================================================" << std::endl;
+    }
+}
+
+void CGMRF_map::saveTimingData(const std::string& phase, int num_cells, int iter, double time_ms)
+{
+    // Open in append mode so we don't overwrite previous runs
+    std::ofstream file("gmrfw_timing_log.csv", std::ios::app);
+    if (file.is_open()) {
+        file << phase << "," << num_cells << "," << iter << "," << time_ms << "\n";
+        file.close();
+    } else {
+        std::cerr << "Error: Could not open timing log file." << std::endl;
     }
 }
 

@@ -105,6 +105,15 @@ namespace gmrfw
             long long sum_ms = std::accumulate(timings_ms.begin(), timings_ms.end(), 0LL);
             return static_cast<double>(sum_ms) / timings_ms.size();
         }
+
+        long long getLastTimeMs() const {
+            if (timings_ms.empty()) return 0;
+            return timings_ms.back();
+        }
+
+        void clear() {
+            timings_ms.clear();
+        }
     };
 
     // Enum for the Factor Types
@@ -243,6 +252,7 @@ namespace gmrfw
         void id2xy(size_t id, double& x, double& y) const;
 
         // Visualization
+        void saveTimingData(const std::string& phase, int num_cells, int iter, double time_ms);
         void save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout, std::vector<Eigen::Triplet<double>>& Aout, Eigen::VectorXd& yout);
         void save_grmf_factor_graph(Eigen::SparseMatrix<double>& H, Eigen::VectorXd& G);
     };
