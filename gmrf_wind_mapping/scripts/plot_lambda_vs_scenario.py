@@ -12,22 +12,20 @@ import re
 # ----------------------------------
 # 1. CONFIGURATION
 # ----------------------------------
-folders = ['NLPD_optimization_results_central_obstacle_01ms', 
-           'NLPD_optimization_results_central_obstacle_05ms', 
-           'NLPD_optimization_results_central_obstacle_1ms',
-           #'NLPD_optimization_results_snake_01ms',
-           #'NLPD_optimization_results_snake_05ms',
-           #'NLPD_optimization_results_snake_1ms',
-           #'NSP_optimization_results_central_obstacle_01ms', 
-           #'NSP_optimization_results_central_obstacle_05ms', 
-           #'NSP_optimization_results_central_obstacle_1ms',
-           #'NSP_optimization_results_snake_01ms',
-           #'NSP_optimization_results_snake_05ms',
-           #'NSP_optimization_results_snake_1ms',
+folders = [#'',
+           #'optimization_results_central_obstacle_01ms',
+           #'optimization_results_central_obstacle_1ms',
+           #'optimization_results_snake_01ms',
+           #'optimization_results_snake_1ms',
+           #'optimization_results_expC_2-3,5',
+           'optimization_results_expC_1-6',
            ]
-lambda_cols = ['Lambda_Reg', 'Lambda_Flux', 'Lambda_Obstacles']
+lambda_cols = ['Lambda_Advection', 'Lambda_Mass', 'Lambda_Diffusion', 'Lambda_Obstacles']
+normalized_cols = [f'Normalized_{col}' for col in lambda_cols]
+metric_cols = ['AAE', 'AME']
 cleaned_data_list = []
 folder_general_medians = []
+remove_outliers = False
 
 def extract_Number(filename):
     """Extrae el primer número encontrado en el nombre del archivo."""
@@ -39,80 +37,69 @@ def extract_Number(filename):
 # ----------------------------------
 for folder in folders:
     # Load all CSVs in the folder
-    files = glob.glob(os.path.join(folder, "Lambda_values_obs_*.csv"))
+    files = glob.glob(os.path.join(folder, "Lambda_values_*.csv"))
     folder_dfs = []
-    folder_medians = []
 
     for file in files:
-
-        # Exclude files with less than 50 observations
-        n_obs = extract_Number(os.path.basename(file))
-        if n_obs < 50:
-            continue
-
         # Load CSV
         df = pd.read_csv(file)
         
-        # Use only the first line of each Repetition (the second is a baseline)
-        experiment_results = df.groupby('Repetition').nth(0).reset_index()
-        
         # Add metadata so we can distinguish between folders in the plot
+        experiment_results = df
         experiment_results['Source_Folder'] = folder
         experiment_results['File_Name'] = os.path.basename(file)
-        folder_dfs.append(experiment_results)
 
-        # Calculamos la mediana de este archivo específico (de las 20 repeticiones)
-        file_median = experiment_results[lambda_cols].median().to_frame().T
-        file_median['Samples'] = extract_Number(os.path.basename(file))
-        file_median['Source_Folder'] = folder
-        folder_medians.append(file_median)        
+        # Set normalized values in new columns (relative to sum of lambdas)
+        lambda_sum = experiment_results[lambda_cols].sum(axis=1)
+        for col in lambda_cols:
+            experiment_results[f'Normalized_{col}'] = experiment_results[col] / lambda_sum
+
+        # Outlier Removal (per file)
+        if remove_outliers:
+            # For each lambda column, remove rows where the value is outside 1.5*IQR
+            mask = pd.Series(True, index=experiment_results.index)
+            for col in lambda_cols:
+                Q1 = experiment_results[col].quantile(0.25)
+                Q3 = experiment_results[col].quantile(0.75)
+                IQR = Q3 - Q1
+                lower = Q1 - 1.5 * IQR
+                upper = Q3 + 1.5 * IQR
+                mask &= (experiment_results[col] >= lower) & (experiment_results[col] <= upper)
+            experiment_results = experiment_results[mask]
+            print(f"File '{file}': Kept {len(experiment_results)}/{len(df)} rows after outlier removal.")
+
+        # Append cleaned experiment results to the folder list
+        folder_dfs.append(experiment_results)
 
     if not folder_dfs:
         continue
         
-    folder_combined = pd.concat(folder_dfs, ignore_index=True)          # Combine all experiments (Num Obs) in this folder
-    folder_medians_df = pd.concat(folder_medians, ignore_index=True)    # Combine all medians
-    # reorder rows by Samples
-    folder_medians_df = folder_medians_df.sort_values(by='Samples')
-    
-    # 3. Plot Median Lambda values vs Nobs (samples) in this folder
-    # ------------------------------------------------
-    filename_medians = folder.replace("NLPD_optimization_results_", "").replace("_phase1", "")
-    plt.figure(figsize=(10, 6))
-    for col in lambda_cols:
-        plt.plot(folder_medians_df['Samples'], folder_medians_df[col], marker='o', label=col)#, linestyle='None')
-    plt.title(f'Evolución de Lambdas según muestras - Carpeta: {filename_medians}')
-    plt.xlabel('Número de Muestras')
-    plt.ylabel('Valor de Lambda (Mediana)')
-    #plt.xscale('log')  # Escala logarítmica suele ser útil si las muestras crecen mucho
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f'lambda_evolution_{filename_medians}.png', dpi=300)
-    plt.show()
-
-
+    # Combine all experiments (NumObs) in this folder into one DataFrame
+    folder_combined = pd.concat(folder_dfs, ignore_index=True)          
+   
     # 4. Per-Folder Outlier Removal
     # --------------------------------------------------
     # Remove outliers based on IQR for each lambda column
-    mask = pd.Series(True, index=folder_combined.index)
-    for col in lambda_cols:
-        Q1 = folder_combined[col].quantile(0.25)
-        Q3 = folder_combined[col].quantile(0.75)
-        IQR = Q3 - Q1
-        lower = Q1 - 1.5 * IQR
-        upper = Q3 + 1.5 * IQR
-        mask &= (folder_combined[col] >= lower) & (folder_combined[col] <= upper)
-    
-    df_folder_clean = folder_combined[mask]
-    cleaned_data_list.append(df_folder_clean)
-    print(f"Folder '{folder}': Kept {len(df_folder_clean)}/{len(folder_combined)} rows.")
+    if remove_outliers:
+        mask = pd.Series(True, index=folder_combined.index)
+        for col in lambda_cols:
+            Q1 = folder_combined[col].quantile(0.25)
+            Q3 = folder_combined[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower = Q1 - 1.5 * IQR
+            upper = Q3 + 1.5 * IQR
+            mask &= (folder_combined[col] >= lower) & (folder_combined[col] <= upper)
+        
+        folder_combined = folder_combined[mask]
+        print(f"Folder '{folder}': Kept {len(folder_combined)}/{len(folder_combined)} rows.")
 
-    # 5. Calculate the "per-folder" general hyperparameters (median) and store
-    folder_general_median = df_folder_clean[lambda_cols].median()
-    folder_general_median['Source_Folder'] = folder
-    folder_general_medians.append(folder_general_median)
+    # Store the cleaned data for this folder
+    cleaned_data_list.append(folder_combined)
     
+    # Calculate the "per-folder"=scenario general hyperparameters (median) and store
+    folder_general_median = folder_combined[lambda_cols].median()
+    folder_general_median['Source_Folder'] = folder
+    folder_general_medians.append(folder_general_median)    
 
 # ALL FOLDERS PROCESSED
 # ----------------------------------
@@ -121,28 +108,75 @@ for folder in folders:
 final_df_clean = pd.concat(cleaned_data_list, ignore_index=True)
 
 # 6. Calculate the "General Hyperparameters" (Centroid)
-general_mean = final_df_clean[lambda_cols].mean()
-general_median = final_df_clean[lambda_cols].median()
+general_mean = final_df_clean[normalized_cols].mean()
+general_median = final_df_clean[normalized_cols].median()
 
-print("\n--- SUGGESTED GLOBAL VALUES (Cleaned Data) ---")
+print("\n--- SUGGESTED GLOBAL VALUES (Cleaned Data among all experiments) ---")
 summary_table = pd.DataFrame({'Mean': general_mean, 'Median': general_median})
 print(summary_table)
 
 
-# 7. Visualization: Pair Plot
+# 7. Visualization:
 plt.figure(figsize=(12, 10))
 sns.set_theme(style="whitegrid")
 
-# PLOT1: Boxplot without outliers
+# PLOT1: Lambda Boxplot
 df_melted = final_df_clean.melt(id_vars=['Source_Folder'], value_vars=lambda_cols, 
                                 var_name='Parameter', value_name='Value')
-
-# 'showfliers=False' is an extra safety, though we already removed them manually
-sns.boxplot(data=df_melted, x='Parameter', y='Value', hue='Source_Folder', showfliers=False)
-plt.title("Distribution of Lambda Parameters (Outliers Removed Per Folder)")
+sns.boxplot(data=df_melted, x='Parameter', y='Value', hue='Source_Folder', 
+            showfliers=True, 
+            medianprops={'color': 'red', 'linewidth': 2}, 
+            showmeans=True, 
+            meanprops={
+                "marker": "D",              # "D" para diamante, "o" para círculo, "^" para triángulo
+                "markerfacecolor": "white", # Interior blanco para que resalte
+                "markeredgecolor": "black", # Borde negro
+                "markersize": "6"           # Tamaño del marcador
+            })
+plt.title("Distribution of Lambda Parameters Across All Folders", fontsize=16)
 plt.xticks(rotation=15)
 plt.tight_layout()
 plt.savefig('lambda_boxplot_all_folders.png')
+plt.show()
+
+# PLOT 2: Boxplot (normalized values)
+df_normalized_melted = final_df_clean.melt(id_vars=['Source_Folder'], value_vars=normalized_cols, 
+                                var_name='Parameter', value_name='Value')
+sns.boxplot(data=df_normalized_melted, x='Parameter', y='Value', hue='Source_Folder', 
+            showfliers=True, 
+            medianprops={'color': 'red', 'linewidth': 2}, 
+            showmeans=True, 
+            meanprops={
+                "marker": "D",              # "D" para diamante, "o" para círculo, "^" para triángulo
+                "markerfacecolor": "white", # Interior blanco para que resalte
+                "markeredgecolor": "black", # Borde negro
+                "markersize": "6"           # Tamaño del marcador
+            })
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.title("Optimal Normalized Lambda Parameters", fontsize=16)
+plt.xticks(rotation=15)
+plt.tight_layout()
+plt.savefig('normalized_lambda_boxplot_all_folders.png')
+plt.show()
+
+# PLOT: Metrics Boxplot
+df_melted = final_df_clean.melt(id_vars=['Source_Folder'], value_vars=metric_cols, 
+                                var_name='Parameter', value_name='Value')
+sns.boxplot(data=df_melted, x='Parameter', y='Value', hue='Source_Folder', 
+            showfliers=True, 
+            medianprops={'color': 'red', 'linewidth': 2}, 
+            showmeans=True, 
+            meanprops={
+                "marker": "D",              # "D" para diamante, "o" para círculo, "^" para triángulo
+                "markerfacecolor": "white", # Interior blanco para que resalte
+                "markeredgecolor": "black", # Borde negro
+                "markersize": "6"           # Tamaño del marcador
+            })
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.title("Optimized Metrics", fontsize=16)
+plt.xticks(rotation=15)
+plt.tight_layout()
+plt.savefig('metrics_boxplot_all_folders.png')
 plt.show()
 
 
@@ -161,8 +195,6 @@ g.fig.suptitle("Cleaned Global Clusters and Suggested Medians (*)", y=1.02, font
 plt.savefig('lambda_pairplot_all_folders.png')
 plt.show()
 
-
-
 # 8. Calculate "General" Values (Summary Statistics)
 summary = final_df_clean[lambda_cols].describe()
 print("Summary Statistics for Lambda Parameters:")
@@ -170,10 +202,10 @@ print(summary)
 
 
 
-# 9. Per-Folder General Medians Summary and Plot (normalizing sum = 100)
+# 9. Per-Folder General Medians Summary and Plot
 folder_general_medians_df = pd.DataFrame(folder_general_medians)
-print("\n--- PER-FOLDER GENERAL MEDIANS (NORMALIZED)---")
-folder_general_medians_df[lambda_cols] = folder_general_medians_df[lambda_cols].div(folder_general_medians_df[lambda_cols].sum(axis=1), axis=0) * 100
+print("\n--- PER-FOLDER GENERAL MEDIANS ---")
+#folder_general_medians_df[lambda_cols] = folder_general_medians_df[lambda_cols].div(folder_general_medians_df[lambda_cols].sum(axis=1), axis=0) * 100
 print(folder_general_medians_df)
 
 # Plot per-folder general medians

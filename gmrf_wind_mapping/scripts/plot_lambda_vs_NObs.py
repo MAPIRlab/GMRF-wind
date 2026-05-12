@@ -16,11 +16,11 @@ import re
 folders = [#'NLPD_optimization_results_central_obstacle_01ms', 
            #'NLPD_optimization_results_central_obstacle_05ms', 
            'NLPD_optimization_results_central_obstacle_1ms',
-           #'NLPD_optimization_results_snake_01ms',
+           'NLPD_optimization_results_snake_01ms',
            #'NLPD_optimization_results_snake_05ms',
-           #'NLPD_optimization_results_snake_1ms',
+           'NLPD_optimization_results_snake_1ms',
            ]
-lambda_cols = ['Lambda_Mass', 'Lambda_Vorticity', 'Lambda_Obstacles', 'Lambda_Reg']
+lambda_cols = ['Lambda_Advection','Lambda_Mass','Lambda_Diffusion','Lambda_Obstacles']
 cleaned_data_list = []
 
 
@@ -34,7 +34,7 @@ def extract_Number(filename):
 # ----------------------------------
 for folder in folders:
     # Load all CSVs in the folder
-    files = glob.glob(os.path.join(folder, "Lambda_values_obs_*.csv"))
+    files = glob.glob(os.path.join(folder, "Lambda_values_*.csv"))
     folder_dfs = []    
 
     for file in files:

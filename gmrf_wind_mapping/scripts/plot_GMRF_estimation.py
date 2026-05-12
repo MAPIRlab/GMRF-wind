@@ -13,8 +13,8 @@ from pyrsistent import ny
 
 # Configuration
 #csv_files = ("gmrf_estimation_1_iters.csv", "gmrf_estimation_2_iters.csv", "gmrf_estimation_10_iters.csv", "gmrf_estimation_100_iters.csv", "gmrf_estimation_1000_iters.csv")
-csv_files = ("gmrf_estimation_100_iters.csv",)
-
+csv_files = ("experiment2/repetition_0/gmrf_estimation_expC_45_obs.csv",)
+threshold = 0.001 # Threshold to consider a cell as "no wind" and avoid plotting streamlines there
 
 def cartesian_to_polar_with_uncertainty(df):
     # Prepare new columns
@@ -123,7 +123,7 @@ def main():
         # 3. Compute Metrics Cell-by-Cell
         # ====================================
 
-        # 3.1 AAE = Average Angular Error (in degrees)
+        # 3.1 AE = Angular Error (in degrees)
         def angular_error(u1, v1, u2, v2):
             dot = u1 * u2 + v1 * v2
             mag1 = np.sqrt(u1**2 + v1**2)
@@ -132,7 +132,7 @@ def main():
             cos_angle = np.clip(cos_angle, -1.0, 1.0)  # Numerical stability
             angle = np.arccos(cos_angle)
             return np.degrees(angle)
-        aae_grid = angular_error(est_x, est_y, gt_x, gt_y)
+        ae_grid = angular_error(est_x, est_y, gt_x, gt_y)
 
         # 3.2 Module Error
         module_error_grid = np.abs(np.sqrt(est_x**2 + est_y**2) - np.sqrt(gt_x**2 + gt_y**2))
@@ -207,7 +207,7 @@ def main():
         # 4. Visualization
         # ====================================
         fig, axs = plt.subplots(3, 3, figsize=(18, 8))
-        cmap_error = 'YlOrRd' # Yellow to Red for errors
+        cmap_error = 'jet' #'YlOrRd' # Yellow to Red for errors
         cmap_uncert = 'Purples'  # Distinct color for uncertainty
         w_scale = np.nanmax(np.sqrt(gt_x**2 + gt_y**2))
         norm_colors = plt.Normalize(vmin=0, vmax=w_scale)
@@ -225,14 +225,17 @@ def main():
         # [0,0] Ground Truth (Quiver) ---
         apply_obstacles(axs[0,0])
         gt_r = np.sqrt(gt_x**2 + gt_y**2)
-        q = axs[0,0].quiver(gt_x, gt_y, gt_r, norm=norm_colors, cmap='viridis', pivot='mid', scale=w_scale, scale_units='xy')
+        q = axs[0,0].quiver(gt_x, gt_y, gt_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
         plt.colorbar(q, label='Wind Speed (m/s)')
         axs[0,0].set_title("Ground Truth Wind")
 
         # [0,1] GT Streamlines 
         apply_obstacles(axs[0,1])
         wind_module = np.sqrt(gt_x**2 + gt_y**2)
-        strm = axs[0,1].streamplot(X, Y, gt_x, gt_y, color=wind_module, linewidth=1, density=1.5, cmap='viridis', norm=norm_colors)
+        # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral        
+        gt_x_clean = np.where(wind_module < threshold, np.nan, gt_x)
+        gt_y_clean = np.where(wind_module < threshold, np.nan, gt_y)
+        strm = axs[0,1].streamplot(X, Y, gt_x_clean, gt_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
         plt.colorbar(strm.lines, ax=axs[0,1], label='Wind Speed (m/s)')
         axs[0,1].set_title("Streamlines of Ground Truth Wind")
 
@@ -249,21 +252,24 @@ def main():
         obs_idx = meta['Obs_idx']
         obs_x = [idx % nx for idx in obs_idx]
         obs_y = [idx // nx for idx in obs_idx]
-        axs[0,0].scatter(obs_x, obs_y, color='red', marker='x', label='Observations')
-        axs[0,0].legend(loc='upper right')
+        axs[0,1].scatter(obs_x, obs_y, color='red', marker='x', label='Observations')
+        #axs[0,1].legend(loc='upper right')
 
         # --- Row 2: GMRF Estimation ---
         # ------------------------------------------------------------------------------------------
         # [1,0] GMRF Estimation (Quiver)
         apply_obstacles(axs[1,0])
-        q = axs[1,0].quiver(est_x, est_y, est_r, norm=norm_colors, cmap='viridis', pivot='mid', scale=w_scale, scale_units='xy')
+        q = axs[1,0].quiver(est_x, est_y, est_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
         plt.colorbar(q, label='Wind Speed (m/s)')
         axs[1,0].set_title("GMRF Wind Estimation")
 
         # [1,1] GMRF Streamlines 
         apply_obstacles(axs[1,1])
         wind_module = np.sqrt(est_x**2 + est_y**2)
-        strm = axs[1,1].streamplot(X, Y, est_x, est_y, color=wind_module, linewidth=1, density=1.5, cmap='viridis', norm=norm_colors)
+        # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral
+        est_x_clean = np.where(wind_module < threshold, np.nan, est_x)
+        est_y_clean = np.where(wind_module < threshold, np.nan, est_y)
+        strm = axs[1,1].streamplot(X, Y, est_x_clean, est_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
         plt.colorbar(strm.lines, ax=axs[1,1], label='Wind Speed (m/s)')
         axs[1,1].set_title("Streamlines of GMRF Wind Estimation")
 
@@ -278,27 +284,27 @@ def main():
 
         # --- Row 3: Performance Metrics ---
         # ------------------------------------------------------------------------------------------
-        # [2,0] AAE ---
+        # [2,0] Angular Error (AE) Heatmap ---
         apply_obstacles(axs[2,0])
-        im1 = axs[2,0].imshow(aae_grid, cmap=cmap_error, origin='lower', vmin=0, vmax=180)
-        plt.colorbar(im1, ax=axs[2,0], label='AAE (degrees)')
-        axs[2,0].set_title("Average Angular Error (AAE)")
-        # Add average AAE text
-        avg_aae = np.nanmean(aae_grid)
-        axs[2,0].text(0.5, 0.1, f'Avg AAE: {avg_aae:.2f}°', transform=axs[2,0].transAxes, ha='center', va='top')
+        im1 = axs[2,0].imshow(ae_grid, cmap=cmap_error, origin='lower', vmin=0, vmax=180)
+        plt.colorbar(im1, ax=axs[2,0], label='AE (degrees)')
+        axs[2,0].set_title("Angular Error (AE)")
+        # Add average (AAE) text
+        avg_ae = np.nanmean(ae_grid)
+        axs[2,0].text(0.5, -0.1, f'AAE: {avg_ae:.2f}°', transform=axs[2,0].transAxes, ha='center', va='top')
 
-        # [2,1] Module Error Heatmap ---
+        # [2,1] Module Error (ME) Heatmap ---
         apply_obstacles(axs[2,1])
         im2 = axs[2,1].imshow(module_error_grid, cmap=cmap_error, origin='lower')
-        plt.colorbar(im2, ax=axs[2,1], label='Module Error (m/s)')
-        axs[2,1].set_title("Module Error")
+        plt.colorbar(im2, ax=axs[2,1], label='ME (m/s)')
+        axs[2,1].set_title("Module Error (ME)")
         # Add average Module Error text
         avg_mod_err = np.nanmean(module_error_grid)
-        axs[2,1].text(0.5, 0.1, f'Avg Module Error: {avg_mod_err:.2f} m/s', transform=axs[2,1].transAxes, ha='center', va='top')
+        axs[2,1].text(0.5, -0.1, f'AME: {avg_mod_err:.2f} m/s', transform=axs[2,1].transAxes, ha='center', va='top')
 
         # [2,2] Normalized Scalar Product (module and angle)---
         apply_obstacles(axs[2,2])
-        im3 = axs[2,2].imshow(ansp_grid, cmap='viridis', origin='lower', vmin=-1, vmax=1)
+        im3 = axs[2,2].imshow(ansp_grid, cmap='jet', origin='lower', vmin=-1, vmax=1)
         plt.colorbar(im3, ax=axs[2,2], label='Normalized Scalar Product')
         axs[2,2].set_title("Normalized Scalar Product (Performance Metric)")
         # Add average ANSP text
@@ -317,6 +323,68 @@ def main():
         base_name = os.path.splitext(csv_file)[0]
         out_file = base_name + '.png'
         plt.savefig(out_file, dpi=300)
+        plt.show()
+
+
+        # ====================================
+        # 5. PAPER Visualizations
+        # ====================================
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+        cmap_error = 'YlOrRd' # Yellow to Red for errors
+        cmap_uncert = 'Purples'  # Distinct color for uncertainty
+        w_scale = np.nanmax(np.sqrt(gt_x**2 + gt_y**2))
+        norm_colors = plt.Normalize(vmin=0, vmax=w_scale)
+        # Meshgrid for streamlines
+        x_coords = np.arange(nx)
+        y_coords = np.arange(ny)
+        X, Y = np.meshgrid(x_coords, y_coords)
+
+        # Helper to apply black obstacles
+        def apply_obstacles(ax):
+            ax.imshow(np.where(mask, 0, np.nan), cmap='gray', vmin=0, vmax=1, origin='lower')
+
+        plot_gt = True
+        if (plot_gt):
+            # [0,0] Ground Truth (Quiver) ---
+            apply_obstacles(axs[0])
+            gt_r = np.sqrt(gt_x**2 + gt_y**2)
+            q = axs[0].quiver(gt_x, gt_y, gt_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
+            plt.colorbar(q, label='Wind Speed (m/s)')
+            axs[0].set_title("Ground Truth Wind")
+
+            # [0,1] GT Streamlines 
+            apply_obstacles(axs[1])
+            wind_module = np.sqrt(gt_x**2 + gt_y**2)
+            # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral        
+            gt_x_clean = np.where(wind_module < threshold, np.nan, gt_x)
+            gt_y_clean = np.where(wind_module < threshold, np.nan, gt_y)
+            strm = axs[1].streamplot(X, Y, gt_x_clean, gt_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
+            plt.colorbar(strm.lines, ax=axs[1], label='Wind Speed (m/s)')
+            axs[1].set_title("Streamlines of Ground Truth Wind")
+        else:
+            # [1,0] GMRF Estimation (Quiver)
+            apply_obstacles(axs[0])
+            q = axs[0].quiver(est_x, est_y, est_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
+            plt.colorbar(q, label='Wind Speed (m/s)')
+            axs[0].set_title("GMRF Wind Estimation")
+
+            # [1,1] GMRF Streamlines 
+            apply_obstacles(axs[1])
+            wind_module = np.sqrt(est_x**2 + est_y**2)
+            # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral
+            est_x_clean = np.where(wind_module < threshold, np.nan, est_x)
+            est_y_clean = np.where(wind_module < threshold, np.nan, est_y)
+            strm = axs[1].streamplot(X, Y, est_x_clean, est_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
+            plt.colorbar(strm.lines, ax=axs[1], label='Wind Speed (m/s)')
+            axs[1].set_title("Streamlines of GMRF Wind Estimation")
+
+        # Adjust layout
+        for ax in axs.flat:
+            ax.set_aspect('equal')
+            ax.set_xticks([]) # Optional: hide ticks for cleaner look
+            ax.set_yticks([])
+
+        plt.tight_layout()        
         plt.show()
 
 
