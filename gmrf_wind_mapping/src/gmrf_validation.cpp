@@ -363,6 +363,169 @@ inline void Cvalgt::ReadGroundTruthWindMap(const std::string& filename)
     }
 }
 
+double safe_stod(const std::string& str)
+{
+    try {
+        return std::stod(str);
+    } catch (...) {
+        return -999.0;
+    }
+}
+
+
+bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
+{
+    // This function loads the IEA Annex 20 dataset (real measurements, only Ux), which is a common benchmark for wind mapping algorithms.
+    std::string filename = "/home/ubuntu/ros2_ws/src/GMRF-wind/gmrf_wind_mapping/IEA_Annex_20_dataset/IEA_Annex_20_real_measurements.csv";
+    std::vector<WindObservation> all_observations;
+    double H = 3.0;
+    double L = 9.0;
+    double h1 = 0.168; // 0.056 * H
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[Error] File not found: " << filename << std::endl;
+        return false;
+    }
+
+    std::string line;
+    int row_count = 0;
+    bool inlet = true; // Flag to identify the inlet observation (first row of horizontal measurements)
+
+    // Read line by line
+    while (std::getline(file, line)) 
+    {
+        row_count++;
+        std::stringstream ss(line);
+        std::string cell;
+        std::vector<std::string> row_cells;
+
+        while (std::getline(ss, cell, ',')) {
+            row_cells.push_back(cell);
+        }
+
+        if (row_cells.empty()) continue;
+
+        // --- BLOQUE 1: Vertical Measurements (Rows 11 to 35 of the original CSV) ---
+        if (row_count >= 11 && row_count <= 35) {
+            // x = H (Columns 1, 2)
+            if (row_cells.size() >= 3) {
+                double coord = safe_stod(row_cells[1]);
+                double mean = safe_stod(row_cells[2]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = H; 
+                    obs.y_metric = (1.0 - coord) * H; // Nielsen physical inversion
+                    obs.u_val = mean;
+                    obs.inlet = false;
+                    obs.profile_type = "vertical_x=H";
+                    all_observations.push_back(obs);
+                }
+            }
+            // x = 2H (Columns 5, 6)
+            if (row_cells.size() >= 7) {
+                double coord = safe_stod(row_cells[5]);
+                double mean = safe_stod(row_cells[6]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = 2.0 * H;
+                    obs.y_metric = (1.0 - coord) * H;
+                    obs.u_val = mean;
+                    obs.inlet = false;
+                    obs.profile_type = "vertical_x=2H";
+                    all_observations.push_back(obs);
+                }
+            }
+        }
+
+        // --- BLOQUE 2: Horizontal Measurements (Rows 42 to 69 of the original CSV) ---
+        if (row_count >= 42 && row_count <= 69) {
+            // y = h/2 (Near ceiling jet) -> Columns 1, 2
+            if (row_cells.size() >= 3) 
+            {
+                double coord = safe_stod(row_cells[1]);
+                double mean = safe_stod(row_cells[2]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = coord * H;
+                    obs.y_metric = H - (0.5 * h1); // Near ceiling
+                    obs.u_val = mean;
+                    obs.profile_type = "horizontal_y=0.5h1";
+                    obs.inlet = inlet;
+                    all_observations.push_back(obs);
+                    inlet = false;
+                }
+            }
+            // y = H - h/2 (Near floor return) -> Columns 5, 6
+            if (row_cells.size() >= 7) {
+                double coord = safe_stod(row_cells[5]);
+                double mean = safe_stod(row_cells[6]);
+                if (coord != -999.0 && mean != -999.0) {
+                    WindObservation obs;
+                    obs.x_metric = coord * H;
+                    obs.y_metric = 0.5 * h1; // Near floor
+                    obs.u_val = mean;
+                    obs.profile_type = "horizontal_y=H-0.5h1";
+                    obs.inlet = false;
+                    all_observations.push_back(obs);
+                }
+            }
+        }
+    }
+    file.close();
+
+    // 2. Select a subset of observations for testing (98/32/16 uniformly distributed)
+    std::vector<WindObservation> selected_observations;
+
+    // if num_samples = 98 --> 21 vertical + 77 horizontal (all)
+    // if num_samples = 32 --> 8 vertical + 24 horizontal
+    // if num_samples = 16 --> 4 vertical + 12 horizontal
+    if (num_samples == 98) {
+        selected_observations = all_observations; // Keep all
+    } else {
+        // Uniformly sample from vertical and horizontal profiles
+        std::vector<WindObservation> vertical_observations;
+        std::vector<WindObservation> horizontal_observations;
+
+        for (const auto& obs : all_observations) {
+            if (obs.profile_type.find("vertical") != std::string::npos) {
+                vertical_observations.push_back(obs);
+            } else if (obs.profile_type.find("horizontal") != std::string::npos) {
+                horizontal_observations.push_back(obs);
+            }
+        }
+
+        // Sample from vertical and horizontal observations Uniformly
+        std::sample(vertical_observations.begin(), vertical_observations.end(), std::back_inserter(selected_observations),
+                    num_samples / 4, std::mt19937{std::random_device{}()}); // Sample 25% from vertical
+        std::sample(horizontal_observations.begin(), horizontal_observations.end(), std::back_inserter(selected_observations),
+                    num_samples * 3 / 4, std::mt19937{std::random_device{}()}); // Sample 75% from horizontal
+    }
+    
+
+
+    // Include always the observation close to the inlet (inlet=true)
+    auto inlet_it = std::find_if(all_observations.begin(), all_observations.end(), [](const WindObservation& obs) {
+        return obs.inlet;
+    });
+    if (inlet_it != all_observations.end()) {
+        selected_observations.push_back(*inlet_it);
+    }   
+    
+
+    // 3. Add selected observations to the GMRF map as if they were measurements from the environment (simulate real sensor measurements)
+    for (const auto& obs : selected_observations)
+    {
+        // Insert observation in GRMF
+        gmrf_map->insertObservation_GMRF(obs.u_val, 0.0, observation_var_wind_speed, observation_var_wind_direction, obs.x_metric, obs.y_metric);        
+    }
+    return true;
+}
+
+
 
 void Cvalgt::SimulateFixedWindObservations()
 {
@@ -383,6 +546,7 @@ void Cvalgt::SimulateFixedWindObservations()
     
     */
     // Exp_C scenario: Set all the 6 inlets/outlets
+    /*
     std::vector<int> activelets = {1, 2, 3, 4, 5 ,6};
     RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Exp_C Inlet.");
     
@@ -440,7 +604,23 @@ void Cvalgt::SimulateFixedWindObservations()
             observation_indices.push_back(i);
         }
     }
-    
+    */
+
+    // IEA Annex 20 scenario: Set the 2 inlets/outlets
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at IEA Annex 20 Inlet and Outlet.");
+    // inlet (top-left)
+    for (size_t row = 28; row <= 30; ++row)
+    {
+        size_t i = row * dimensions.x() + 1;
+        observation_indices.push_back(i);
+    }
+    // outlet (bottom-right)
+    for (size_t row = 2; row <= 6; ++row)
+    {
+        size_t i = row * dimensions.x() - 2;
+        observation_indices.push_back(i);
+        
+    }
 
     // Create observations in the GMRF map from the GT map
     for (size_t idx : observation_indices)
@@ -1358,7 +1538,10 @@ int main(int argc, char** argv)
     case 2:     // Manual tunning of lambda parameters (dynamic reconfigure)
     {
         // Simulate Observations   
-        my_gmrf_map->SimulateFixedWindObservations();
+        //my_gmrf_map->SimulateFixedWindObservations();
+
+        // Load IAE Annex 20 data
+        my_gmrf_map->LoadIAEAnnex20Data(98);
         
         // Start a background thread to handle ROS callbacks
         rclcpp::executors::MultiThreadedExecutor executor;

@@ -35,6 +35,7 @@ add_subdirectory(gmrf_wind_core)
 # Install launch files and related config files.
 install(DIRECTORY
   launch
+  IEA_Annex_20_dataset
   DESTINATION share/${PROJECT_NAME}
 )
 
