@@ -14,6 +14,7 @@ from pyrsistent import ny
 # Configuration
 #csv_files = ("gmrf_estimation_1_iters.csv", "gmrf_estimation_2_iters.csv", "gmrf_estimation_10_iters.csv", "gmrf_estimation_100_iters.csv", "gmrf_estimation_1000_iters.csv")
 csv_files = ("experiment2/repetition_0/gmrf_estimation_expC_45_obs.csv",)
+csv_files = ("gmrf_estimation.csv",)
 threshold = 0.001 # Threshold to consider a cell as "no wind" and avoid plotting streamlines there
 
 def cartesian_to_polar_with_uncertainty(df):
@@ -49,7 +50,7 @@ def propagate_uncertainty_cartesian_to_polar(x, y, vx, vy, cov_xy):
 
     # 1. Compute r and theta
     r = np.sqrt(pow(x, 2) + pow(y, 2))
-    theta = np.atan2(y, x)
+    theta = np.arctan2(y, x)
 
     # Jacobian elements
     dr_dx = x / r if r > 0 else 0

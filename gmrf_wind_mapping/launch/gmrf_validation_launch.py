@@ -25,20 +25,23 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             #{"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_snake", "occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
             #{"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "10x6_snake", "wind_simulations", "01ms", "wind_at_cell_centers_0.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
-            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
-            {"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "wind_simulations", "1,2,3-5,6_0.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
-            {"cell_size": 0.17},                               # Size of each cell in the GMRF grid (meters)
+            #{"map_yaml_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            #{"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "wind_simulations", "1,2,3-5,6_0.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
+            {"map_yaml_file": os.path.join(pkg_dir, "IEA_Annex_20_dataset", "IEA_Annex_20_occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            {"cfd_csv_file": os.path.join(pkg_dir, "IEA_Annex_20_dataset", "CFD_wind_at_cell_centers_10K_iters.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
+            
+            {"cell_size": 0.1},                               # Size of each cell in the GMRF grid (meters) exp at 0.17
             {"verbose": False},                                # Verbose mode for debugging
             {"visualize_gmrf": False},                         # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
             {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
             {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
-            {"GMRF_lambdaPrior_advection": 1.0},               # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
+            {"GMRF_lambdaPrior_advection": 1.0},             # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
             {"GMRF_lambdaPrior_mass_conservation": 100.0},     # Mass conservation law -> divergence of the wind field is zero
             {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
             {"GMRF_lambdaPrior_obstacles": 100.0},             # Obstacles --> cells close to obstacles has only tangencial wind
             {"num_iterations_MAP": 100},                       # Maximum number of iterations for the MAP estimation optimization
-            {"experiment_number": 4},                          # 1: Lambda Opt (Fixed Obs), 2: Manual Tunning, 3: Increasing number of observations, 4: Computational Time
+            {"experiment_number": 2},                          # 1: Lambda Opt (Fixed Obs), 2: Manual Tunning, 3: Increasing number of observations, 4: Computational Time
             {"optimization_metric": "ME&AE"},                  # Metric to optimize when tuning the GMRF hyperparameters (lambda weights and observation variances). Options: "AE", "ME", "RSE", "NSP", "NLPD", "ME&AE"
         ]
     )
