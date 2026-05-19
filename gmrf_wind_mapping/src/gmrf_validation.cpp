@@ -516,11 +516,12 @@ bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
     }   
     
 
-    // 3. Add selected observations to the GMRF map as if they were measurements from the environment (simulate real sensor measurements)
+    // 3. Add selected observations to the GMRF map
     for (const auto& obs : selected_observations)
     {
-        // Insert observation in GRMF
-        gmrf_map->insertObservation_GMRF(obs.u_val, 0.0, observation_var_wind_speed, observation_var_wind_direction, obs.x_metric, obs.y_metric);        
+        // Insert observation in GRMF 
+        // only wind_x data is available in the IEA Annex 20 dataset, so we set wind_y as NaN
+        gmrf_map->insertObservation_xy_GMRF(obs.u_val, std::numeric_limits<double>::quiet_NaN(), observation_var_wind_speed, observation_var_wind_direction, obs.x_metric, obs.y_metric);        
     }
     return true;
 }
