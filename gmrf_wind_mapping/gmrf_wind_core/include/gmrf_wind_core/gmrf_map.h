@@ -164,6 +164,8 @@ namespace gmrfw
 
         // Observations and Parameters
         bool insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
+        bool insertObservation_xy_GMRF(double wind_x, double wind_y, double var_wind_x, double var_wind_y, double x_pos, double y_pos);
+        
         void clearObservations_GMRF();
         void getObservationsIdx(std::vector<int>& obs_idx);
         void update_lambdas(double m_lambdaPrior_adv, double m_lambdaPrior_mass, double m_lambdaPrior_diff, double m_lambdaPrior_obstacles);

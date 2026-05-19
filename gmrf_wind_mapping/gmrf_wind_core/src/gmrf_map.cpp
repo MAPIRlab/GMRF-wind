@@ -660,6 +660,74 @@ bool CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     }
 }
 
+bool CGMRF_map::insertObservation_xy_GMRF(double wind_x, double wind_y, double var_wind_x, double var_wind_y, double x_pos, double y_pos)
+{
+    // Overload for when the user already provides the wind components and their variances
+    // Also usefull for inserting just wind on one of the components (NaN for the other component)
+    try
+    {
+        auto add_obs = [this](const TobservationGMRF& observation)
+        {
+            if (observation.cell_idx < 0 || observation.cell_idx > N)
+            {
+                std::cerr << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
+                return;
+            }
+            activeObs.push_back(observation);
+        };
+
+        // Get cell indexes
+        const int cellIdx = xy2idx(x_pos, y_pos);
+
+        // Fill new Observation
+        if (x_pos <= m_x_min || x_pos >= m_x_max || y_pos <= m_y_min || y_pos >= m_y_max || !is_cell_free(cellIdx))
+            return false;
+
+        TobservationGMRF new_obs;
+        new_obs.cell_idx = cellIdx;
+        new_obs.wind_x = wind_x;
+        new_obs.wind_y = wind_y;
+        new_obs.var_xx = var_wind_x;
+        new_obs.var_yy = var_wind_y;
+        new_obs.cov_xy = 0.0; // Assuming no covariance between x and y components for simplicity
+        new_obs.wind_module = std::numeric_limits<double>::quiet_NaN();  //set as NaN to indicate that the module and direction are not provided (only components)
+        new_obs.wind_direction = std::numeric_limits<double>::quiet_NaN();
+        new_obs.time_invariant = true; // Default behaviour, the obs will not lose weight with time.
+
+        if (verbose)
+            std::cerr << "[GMRF-MAP] New obs: Wx = " << new_obs.wind_x << " m/s Wy = " << new_obs.wind_y << " m/s" << std::endl;
+
+        // Add Observation to GMRF
+        if (std::isnan(wind_x) && std::isnan(wind_y))
+        {
+            std::cerr << "[GMRF-MAP] Invalid observation: Both wind_x and wind_y are NaN." << std::endl;
+            return false;
+        }
+        else if (std::isnan(wind_x))
+        {
+            // Only wind_y is provided, set a high variance for wind_x to reflect the uncertainty
+            new_obs.var_xx = 1e6; // Large variance for unknown component
+            nObsFactors += 1; // Only one factor for wind_y
+        }
+        else if (std::isnan(wind_y))
+        {
+            // Only wind_x is provided, set a high variance for wind_y to reflect the uncertainty
+            new_obs.var_yy = 1e6; // Large variance for unknown component
+            nObsFactors += 1; // Only one factor for wind_x
+        }
+        add_obs(new_obs);
+        return true;
+    }
+    catch (std::exception e)
+    {
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-insertObservation_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        return false;
+    }
+}
+
+
 std::vector<TobservationGMRF> CGMRF_map::getObservations_GMRF()
 {
     return activeObs;
@@ -953,26 +1021,34 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             size_t count = nPriorFactors; // start after the already introduced prior factors
             for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
             {
-                bool x_y_independent = false;
-
-                if (x_y_independent)
+                // Check if module is set (not NaN), if not we assume that the user provided directly 
+                // the components x,y and their variances.
+                if (std::isnan(ito->wind_module) && std::isnan(ito->wind_direction))
                 {
-                    // Each observation translates to 2 factors (Wx,Wy)
+                    // Each observation translates to a maximum of 2 factors (Wx,Wy)
+                    // It depends on the user input
+                    
                     // Wx range [1,N]
-                    Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
-                    J_temp.push_back(J_entry);
-                    y_temp[count] = ito->wind_x;
-                    Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
-                    Lambda_temp.push_back(lambda_entry);
-                    count++;
+                    if (!std::isnan(ito->wind_x))
+                    {
+                        Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
+                        J_temp.push_back(J_entry);
+                        y_temp[count] = ito->wind_x;
+                        Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
+                        Lambda_temp.push_back(lambda_entry);
+                        count++;
+                    }
 
                     // Wy range [N+1,2N]
-                    Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
-                    J_temp.push_back(J_entry2);
-                    y_temp[count] = ito->wind_y;
-                    Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
-                    Lambda_temp.push_back(lambda_entry2);
-                    count++;
+                    if (!std::isnan(ito->wind_y))
+                    {
+                        Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
+                        J_temp.push_back(J_entry2);
+                        y_temp[count] = ito->wind_y;
+                        Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
+                        Lambda_temp.push_back(lambda_entry2);
+                        count++;
+                    }
                 }
                 else
                 {
