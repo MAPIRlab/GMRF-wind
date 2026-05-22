@@ -13,8 +13,8 @@ from pyrsistent import ny
 
 # Configuration
 #csv_files = ("gmrf_estimation_1_iters.csv", "gmrf_estimation_2_iters.csv", "gmrf_estimation_10_iters.csv", "gmrf_estimation_100_iters.csv", "gmrf_estimation_1000_iters.csv")
-csv_files = ("experiment2/repetition_0/gmrf_estimation_expC_45_obs.csv",)
-csv_files = ("gmrf_estimation.csv",)
+#csv_files = ("experiment2/repetition_0/gmrf_estimation_expC_45_obs.csv",)
+csv_files = ("gmrf_estimation_IAE_annex20_16obs_iter10.csv",)
 threshold = 0.001 # Threshold to consider a cell as "no wind" and avoid plotting streamlines there
 
 def cartesian_to_polar_with_uncertainty(df):
@@ -99,6 +99,7 @@ def main():
         # ====================================
         def to_grid(series):
             return series.values.reshape((ny, nx))
+        
         # Cartesian
         est_x = to_grid(df['gmrf_wind_x'])
         est_y = to_grid(df['gmrf_wind_y'])
@@ -119,11 +120,31 @@ def main():
         # We'll use this to color cells black
         mask = np.isnan(est_x)
 
-
+        # Normalize GT and Estimation for better visualization (optional)
+        u0 = 0.4554 # wind speed at inlet
+        
         # ====================================
         # 3. Compute Metrics Cell-by-Cell
         # ====================================
 
+        # Errors in Cartesian components
+        error_x_grid = est_x - gt_x
+        error_y_grid = est_y - gt_y
+        
+        # MAE for each component
+        mae_x = np.nanmean(np.abs(error_x_grid))
+        mae_y = np.nanmean(np.abs(error_y_grid))
+
+        # RMSE for each component
+        rmse_x = np.sqrt(np.nanmean(error_x_grid**2))
+        rmse_y = np.sqrt(np.nanmean(error_y_grid**2))
+        rmse = np.sqrt(np.nanmean(error_x_grid**2 + error_y_grid**2))
+        mae = np.nanmean(np.sqrt(error_x_grid**2 + error_y_grid**2))
+               
+        print(f"MAE_X/U0: {mae_x/u0:.4f}, MAE_Y/U0: {mae_y/u0:.4f}, Overall MAE/U0: {mae/u0:.4f}")
+        print(f"RMSE_X/U0: {rmse_x/u0:.4f}, RMSE_Y/U0: {rmse_y/u0:.4f}, Overall RMSE/U0: {rmse/u0:.4f}")
+
+        """
         # 3.1 AE = Angular Error (in degrees)
         def angular_error(u1, v1, u2, v2):
             dot = u1 * u2 + v1 * v2
@@ -202,7 +223,7 @@ def main():
         max_eig_grid = np.sqrt( 0.5 * (var_x + var_y + np.sqrt((var_x - var_y)**2 + 4 * cov_xy**2)) ) # Largest eigenvalue (m/s)
         det_uncertainty_grid = var_x * var_y - cov_xy**2  # Geometric mean of the eigenvalues
         trace_uncertainty_grid = var_x + var_y  # Sum of variances (upper bound on total uncertainty)
-
+        """
 
         # ====================================
         # 4. Visualization
@@ -216,103 +237,162 @@ def main():
         x_coords = np.arange(nx)
         y_coords = np.arange(ny)
         X, Y = np.meshgrid(x_coords, y_coords)
-
+        
         # Helper to apply black obstacles
         def apply_obstacles(ax):
             ax.imshow(np.where(mask, 0, np.nan), cmap='gray', vmin=0, vmax=1, origin='lower')
+            # axis labels
+            ax.set_xlabel('X/H')
+            ax.set_ylabel('Y/H')
+            # ticks
+            ax.set_xticks(np.arange(0, 3.1, 0.5))
+            ax.set_yticks(np.arange(0, 1.1, 0.25))
+            ax.set_xticklabels([f'{x:.1f}' for x in np.arange(0, 3.1, 0.5)])
+            ax.set_yticklabels([f'{y:.2f}' for y in np.arange(0, 1.1, 0.25)])
+            # Aseguramos que los límites del plot respeten estrictamente el entorno
+            #ax.set_xlim(0, 3)
+            #ax.set_ylim(0, 1)
 
-        # --- Row 1:  GT 
+        
+        # ------------------------------------------------------------------------------------------
+        # --- Row 1:  GT         
         # ------------------------------------------------------------------------------------------
         # [0,0] Ground Truth (Quiver) ---
-        apply_obstacles(axs[0,0])
-        gt_r = np.sqrt(gt_x**2 + gt_y**2)
-        q = axs[0,0].quiver(gt_x, gt_y, gt_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
-        plt.colorbar(q, label='Wind Speed (m/s)')
-        axs[0,0].set_title("Ground Truth Wind")
+        #apply_obstacles(axs[0,0])
+        #gt_r = np.sqrt(gt_x**2 + gt_y**2)
+        #q = axs[0,0].quiver(gt_x, gt_y, gt_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
+        #plt.colorbar(q, label='Wind Speed (m/s)')
+        #axs[0,0].set_title("Ground Truth Wind")
 
-        # [0,1] GT Streamlines 
-        apply_obstacles(axs[0,1])
+        # [0,0] GT Streamlines 
+        apply_obstacles(axs[0,0])
         wind_module = np.sqrt(gt_x**2 + gt_y**2)
         # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral        
         gt_x_clean = np.where(wind_module < threshold, np.nan, gt_x)
         gt_y_clean = np.where(wind_module < threshold, np.nan, gt_y)
-        strm = axs[0,1].streamplot(X, Y, gt_x_clean, gt_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
-        plt.colorbar(strm.lines, ax=axs[0,1], label='Wind Speed (m/s)')
-        axs[0,1].set_title("Streamlines of Ground Truth Wind")
-
-        # [0,2] Uncertainty Heatmap
-        apply_obstacles(axs[0,2])
-        im_u = axs[0,2].imshow(max_eig_grid, cmap=cmap_uncert, origin='lower', vmin=0, vmax=w_scale)
-        plt.colorbar(im_u, ax=axs[0,2], label='Max Eigenvalue of Covariance (m/s)')
-        axs[0,2].set_title("GMRF Estimation Uncertainty (Max Eigenvalue)")
-        # Add average uncertainty text
-        avg_uncertainty = np.nanmean(max_eig_grid)
-        axs[0,2].text(0.5, 0.1, f'Avg Max Eigenvalue: {avg_uncertainty:.2f} m/s', transform=axs[0,2].transAxes, ha='center', va='top')
-
+        strm = axs[0,0].streamplot(X, Y, gt_x_clean/u0, gt_y_clean/u0, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
+        plt.colorbar(strm.lines, ax=axs[0,0], label='U/U0')
+        axs[0,0].set_title("Streamlines of Ground Truth Wind")
         # Add observed cells in the plot
         obs_idx = meta['Obs_idx']
         obs_x = [idx % nx for idx in obs_idx]
         obs_y = [idx // nx for idx in obs_idx]
-        axs[0,1].scatter(obs_x, obs_y, color='red', marker='x', label='Observations')
-        #axs[0,1].legend(loc='upper right')
+        axs[0,0].scatter(obs_x, obs_y, color='red', marker='x', label='Observations')
+        
+        
 
+        # [0,1] Uncertainty Heatmap
+        #apply_obstacles(axs[0,2])
+        #im_u = axs[0,2].imshow(max_eig_grid, cmap=cmap_uncert, origin='lower', vmin=0, vmax=w_scale)
+        #plt.colorbar(im_u, ax=axs[0,2], label='Max Eigenvalue of Covariance (m/s)')
+        #axs[0,2].set_title("GMRF Estimation Uncertainty (Max Eigenvalue)")
+        # Add average uncertainty text
+        #avg_uncertainty = np.nanmean(max_eig_grid)
+        #axs[0,2].text(0.5, 0.1, f'Avg Max Eigenvalue: {avg_uncertainty:.2f} m/s', transform=axs[0,2].transAxes, ha='center', va='top')
+
+        # [0,1] GT Wind-x component Heatmap        
+        apply_obstacles(axs[0,1])
+        im_x = axs[0,1].imshow(gt_x/u0, cmap='jet', origin='lower', vmin=-0.5, vmax=1)
+        plt.colorbar(im_x, ax=axs[0,1], label='Ux/U0')
+        axs[0,1].set_title("GT Wind X Component")
+        
+
+        # [0,2] GT Wind-y component Heatmap
+        apply_obstacles(axs[0,2])
+        im_y = axs[0,2].imshow(gt_y/u0, cmap='jet', origin='lower', vmin=-0.5, vmax=1)
+        plt.colorbar(im_y, ax=axs[0,2], label='Uy/U0')
+        axs[0,2].set_title("GT Wind Y Component")
+
+
+        # ------------------------------------------------------------------------------------------
         # --- Row 2: GMRF Estimation ---
         # ------------------------------------------------------------------------------------------
         # [1,0] GMRF Estimation (Quiver)
-        apply_obstacles(axs[1,0])
-        q = axs[1,0].quiver(est_x, est_y, est_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
-        plt.colorbar(q, label='Wind Speed (m/s)')
-        axs[1,0].set_title("GMRF Wind Estimation")
+        #apply_obstacles(axs[1,0])
+        #q = axs[1,0].quiver(est_x, est_y, est_r, norm=norm_colors, cmap='jet', pivot='mid', scale=w_scale, scale_units='xy')
+        #plt.colorbar(q, label='Wind Speed (m/s)')
+        #axs[1,0].set_title("GMRF Wind Estimation")
 
-        # [1,1] GMRF Streamlines 
-        apply_obstacles(axs[1,1])
+        # [1,0] GMRF Streamlines 
+        apply_obstacles(axs[1,0])
         wind_module = np.sqrt(est_x**2 + est_y**2)
         # Sustituyes los componentes U y V por NaN donde el viento sea menor al umbral
         est_x_clean = np.where(wind_module < threshold, np.nan, est_x)
         est_y_clean = np.where(wind_module < threshold, np.nan, est_y)
-        strm = axs[1,1].streamplot(X, Y, est_x_clean, est_y_clean, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
-        plt.colorbar(strm.lines, ax=axs[1,1], label='Wind Speed (m/s)')
-        axs[1,1].set_title("Streamlines of GMRF Wind Estimation")
+        strm = axs[1,0].streamplot(X, Y, est_x_clean/u0, est_y_clean/u0, color=wind_module, linewidth=1, density=1.5, cmap='jet', norm=norm_colors)
+        plt.colorbar(strm.lines, ax=axs[1,0], label='U/U0')
+        axs[1,0].set_title("Streamlines of GMRF Wind Estimation")
 
         # [1,2] NLPD cartesian Heatmap ---
-        apply_obstacles(axs[1,2])
-        im4 = axs[1,2].imshow(nlpd_cart_grid, cmap=cmap_error, origin='lower', vmin=-5, vmax=5)
-        plt.colorbar(im4, ax=axs[1,2], label='NLPD')
-        axs[1,2].set_title("Cartesian NLPD (Uncertainty-Aware Error)")
+        #apply_obstacles(axs[1,2])
+        #im4 = axs[1,2].imshow(nlpd_cart_grid, cmap=cmap_error, origin='lower', vmin=-5, vmax=5)
+        #plt.colorbar(im4, ax=axs[1,2], label='NLPD')
+        #axs[1,2].set_title("Cartesian NLPD (Uncertainty-Aware Error)")
         # Add average NLPD text
-        avg_nlpd_cart = np.nanmean(nlpd_cart_grid)
-        axs[1,2].text(0.5, 0.1, f'Avg NLPD: {avg_nlpd_cart:.2f}', transform=axs[1,2].transAxes, ha='center', va='top')
+        #avg_nlpd_cart = np.nanmean(nlpd_cart_grid)
+        #axs[1,2].text(0.5, 0.1, f'Avg NLPD: {avg_nlpd_cart:.2f}', transform=axs[1,2].transAxes, ha='center', va='top')
 
+        # [1,1] GMRF Wind-X estimation Heatmap
+        apply_obstacles(axs[1,1])
+        im_x_est = axs[1,1].imshow(est_x/u0, cmap='jet', origin='lower', vmin=-0.5, vmax=1)
+        plt.colorbar(im_x_est, ax=axs[1,1], label='Ux/U0')
+        axs[1,1].set_title("GMRF Estimation Wind X Component")
+
+        # [1,2] GMRF Wind-Y estimation Heatmap
+        apply_obstacles(axs[1,2])
+        im_y_est = axs[1,2].imshow(est_y/u0, cmap='jet', origin='lower', vmin=-0.5, vmax=1)
+        plt.colorbar(im_y_est, ax=axs[1,2], label='Uy/U0')
+        axs[1,2].set_title("GMRF Estimation Wind Y Component")
+
+
+        # ------------------------------------------------------------------------------------------
         # --- Row 3: Performance Metrics ---
         # ------------------------------------------------------------------------------------------
         # [2,0] Angular Error (AE) Heatmap ---
-        apply_obstacles(axs[2,0])
-        im1 = axs[2,0].imshow(ae_grid, cmap=cmap_error, origin='lower', vmin=0, vmax=180)
-        plt.colorbar(im1, ax=axs[2,0], label='AE (degrees)')
-        axs[2,0].set_title("Angular Error (AE)")
+        #apply_obstacles(axs[2,0])
+        #im1 = axs[2,0].imshow(ae_grid, cmap=cmap_error, origin='lower', vmin=0, vmax=180)
+        #plt.colorbar(im1, ax=axs[2,0], label='AE (degrees)')
+        #axs[2,0].set_title("Angular Error (AE)")
         # Add average (AAE) text
-        avg_ae = np.nanmean(ae_grid)
-        axs[2,0].text(0.5, -0.1, f'AAE: {avg_ae:.2f}°', transform=axs[2,0].transAxes, ha='center', va='top')
+        #avg_ae = np.nanmean(ae_grid)
+        #axs[2,0].text(0.5, -0.1, f'AAE: {avg_ae:.2f}°', transform=axs[2,0].transAxes, ha='center', va='top')
 
         # [2,1] Module Error (ME) Heatmap ---
-        apply_obstacles(axs[2,1])
-        im2 = axs[2,1].imshow(module_error_grid, cmap=cmap_error, origin='lower')
-        plt.colorbar(im2, ax=axs[2,1], label='ME (m/s)')
-        axs[2,1].set_title("Module Error (ME)")
+        #apply_obstacles(axs[2,1])
+        #im2 = axs[2,1].imshow(module_error_grid, cmap=cmap_error, origin='lower')
+        #plt.colorbar(im2, ax=axs[2,1], label='ME (m/s)')
+        #axs[2,1].set_title("Module Error (ME)")
         # Add average Module Error text
-        avg_mod_err = np.nanmean(module_error_grid)
-        axs[2,1].text(0.5, -0.1, f'AME: {avg_mod_err:.2f} m/s', transform=axs[2,1].transAxes, ha='center', va='top')
+        #avg_mod_err = np.nanmean(module_error_grid)
+        #axs[2,1].text(0.5, -0.1, f'AME: {avg_mod_err:.2f} m/s', transform=axs[2,1].transAxes, ha='center', va='top')
 
         # [2,2] Normalized Scalar Product (module and angle)---
-        apply_obstacles(axs[2,2])
-        im3 = axs[2,2].imshow(ansp_grid, cmap='jet', origin='lower', vmin=-1, vmax=1)
-        plt.colorbar(im3, ax=axs[2,2], label='Normalized Scalar Product')
-        axs[2,2].set_title("Normalized Scalar Product (Performance Metric)")
+        #apply_obstacles(axs[2,2])
+        #im3 = axs[2,2].imshow(ansp_grid, cmap='jet', origin='lower', vmin=-1, vmax=1)
+        #plt.colorbar(im3, ax=axs[2,2], label='Normalized Scalar Product')
+        #axs[2,2].set_title("Normalized Scalar Product (Performance Metric)")
         # Add average ANSP text
-        avg_ansp = np.nanmean(ansp_grid)
-        axs[2,2].text(0.5, 0.1, f'Avg ANSP: {avg_ansp:.2f}', transform=axs[2,2].transAxes, ha='center', va='top')
+        #avg_ansp = np.nanmean(ansp_grid)
+        #axs[2,2].text(0.5, 0.1, f'Avg ANSP: {avg_ansp:.2f}', transform=axs[2,2].transAxes, ha='center', va='top')
 
+        # [2,0] MAE and RMSE as text
+        axs[2,0].text(0.5, -0.1, f'MAE: {mae:.2f}, RMSE: {rmse:.2f}', transform=axs[2,0].transAxes, ha='center', va='top')
         
+        #[2,1] Absolute error in X component Heatmap ---
+        apply_obstacles(axs[2,1])
+        im_err_x = axs[2,1].imshow(np.abs(error_x_grid)/u0, cmap=cmap_error, origin='lower', vmin=0, vmax=0.5)
+        plt.colorbar(im_err_x, ax=axs[2,1], label='Absolute Error X /U0')
+        axs[2,1].set_title("Absolute Error in X Component")
+        # Add Mean Absolute Error in X text (MAE)
+        axs[2,1].text(0.5, -0.1, f'MAE X: {mae_x:.2f}', transform=axs[2,1].transAxes, ha='center', va='top')
+
+        #[2,2] Absolute error in Y component Heatmap ---
+        apply_obstacles(axs[2,2])
+        im_err_y = axs[2,2].imshow(np.abs(error_y_grid)/u0, cmap=cmap_error, origin='lower', vmin=0, vmax=0.5)
+        plt.colorbar(im_err_y, ax=axs[2,2], label='Absolute Error Y /U0')
+        axs[2,2].set_title("Absolute Error in Y Component")
+        # Add Mean Absolute Error in Y text (MAE)
+        axs[2,2].text(0.5, -0.1, f'MAE Y: {mae_y:.2f}', transform=axs[2,2].transAxes, ha='center', va='top')
 
         # Adjust layout
         for ax in axs.flat:

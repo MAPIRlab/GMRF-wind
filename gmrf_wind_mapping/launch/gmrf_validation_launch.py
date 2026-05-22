@@ -28,7 +28,7 @@ def launch_setup(context, *args, **kwargs):
             #{"map_yaml_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
             #{"cfd_csv_file": os.path.join(test_env_dir, "scenarios", "Exp_C", "wind_simulations", "1,2,3-5,6_0.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
             {"map_yaml_file": os.path.join(pkg_dir, "IEA_Annex_20_dataset", "IEA_Annex_20_occupancy.yaml")},                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
-            {"cfd_csv_file": os.path.join(pkg_dir, "IEA_Annex_20_dataset", "CFD_wind_at_cell_centers_10K_iters.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
+            {"cfd_csv_file": os.path.join(pkg_dir, "IEA_Annex_20_dataset", "CFD_wind_at_cell_centers_convergence.csv")},   # Path to a CSV file containing the CFD ground-truth wind data           
             
             {"cell_size": 0.1},                               # Size of each cell in the GMRF grid (meters) exp at 0.17
             {"verbose": False},                                # Verbose mode for debugging
@@ -41,7 +41,7 @@ def launch_setup(context, *args, **kwargs):
             {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
             {"GMRF_lambdaPrior_obstacles": 100.0},             # Obstacles --> cells close to obstacles has only tangencial wind
             {"num_iterations_MAP": 100},                       # Maximum number of iterations for the MAP estimation optimization
-            {"experiment_number": 2},                          # 1: Lambda Opt (Fixed Obs), 2: Manual Tunning, 3: Increasing number of observations, 4: Computational Time
+            {"experiment_number": 5},                          # 1: Lambda Opt (Fixed Obs), 2: Manual Tunning, 3: Increasing number of observations, 4: Computational Time, 5: IEA Dataset with 20 repetition for num_samples (98,32 and 16)
             {"optimization_metric": "ME&AE"},                  # Metric to optimize when tuning the GMRF hyperparameters (lambda weights and observation variances). Options: "AE", "ME", "RSE", "NSP", "NLPD", "ME&AE"
         ]
     )

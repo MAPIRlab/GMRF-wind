@@ -11,7 +11,7 @@ data_path = './src/GMRF-wind/gmrf_wind_mapping/IEA_Annex_20_dataset/IEA_Annex_20
 df_data = pd.read_csv(data_path, header=None)
 
 # (B) CFD data (Simscale simulation of the same case)
-cfd_path = './src/GMRF-wind/gmrf_wind_mapping/IEA_Annex_20_dataset/CFD_wind_at_cell_centers_10K_iters.csv' 
+cfd_path = './src/GMRF-wind/gmrf_wind_mapping/IEA_Annex_20_dataset/CFD_wind_at_cell_centers_convergence.csv' 
 df_cfd = pd.read_csv(cfd_path)
 
 # Asumiendo columnas: Points:0 (x), Points:1 (y), U:0 (Ux)
@@ -90,7 +90,7 @@ df_final = pd.concat([df_xH, df_x2H, df_y05h1, df_yH05h1], ignore_index=True)
 # 3. PLOTTING COMPARATIVO
 # ==================================================
 plt.figure(figsize=(14, 12))
-tol = 0.05 # Tolerancia para considerar puntos cercanos a las líneas de interés
+tol = 0.01 # Tolerancia para considerar puntos cercanos a las líneas de interés
 
 # Subfigura 1: Perfil Vertical x = H
 plt.subplot(2, 2, 4)
