@@ -186,6 +186,7 @@ namespace gmrfw
         // This forwards to the internal id2xy() utility and is provided for visualization
         // helpers that need world coordinates for each GMRF cell.
         void id2xy_public(size_t id, double& x, double& y) const;
+        int xy2idx_public(float x, float y) const;
         bool is_cell_free(size_t id_gmrf) const;
         bool is_cell_boundary(size_t id_gmrf) const;
 

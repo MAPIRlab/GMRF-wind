@@ -1037,6 +1037,9 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                         Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
                         Lambda_temp.push_back(lambda_entry);
                         count++;
+                        // print debug
+                        if (verbose)
+                            std::cerr << "          [GMRF] Obs Factor (only WIND-X): Cell " << ito->cell_idx << " Wx = " << ito->wind_x << " var_xx = " << ito->var_xx << std::endl;
                     }
 
                     // Wy range [N+1,2N]
@@ -1513,4 +1516,10 @@ int CGMRF_map::xy2idx(float x, float y) const
 void CGMRF_map::id2xy_public(size_t id, double& x, double& y) const
 {
     id2xy(id, x, y);
+}
+
+//Public wrapper to expose xy2idx
+int CGMRF_map::xy2idx_public(float x, float y) const
+{
+    return xy2idx(x, y);
 }
