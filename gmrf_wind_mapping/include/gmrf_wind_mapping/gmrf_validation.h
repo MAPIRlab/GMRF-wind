@@ -54,6 +54,7 @@ public:
     void SimulateWindObservations(size_t N_obs, bool remove_old_observations);
     void SimulateFixedWindObservations();    
     bool LoadIAEAnnex20Data(const int num_samples);
+    bool SimulateIAEAnnex20Data(const int num_samples);
     void clearEstimation();
     void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_obst);
     void read_lambdas(double &lambda_adv, double &lambda_mass, double &lambda_diff, double &lambda_obst);
