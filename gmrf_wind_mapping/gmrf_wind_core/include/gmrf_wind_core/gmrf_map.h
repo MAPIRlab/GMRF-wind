@@ -144,6 +144,8 @@ namespace gmrfw
             double lambdaPrior_mass_conservation = 1000; // Weight for mass conservation (divergence free)
             double lambdaPrior_diffusion = 0.0001;       // Weight for difussion prior (wind in a cell should be similar to its neighbors in all directions, also regularization)
             double lambdaPrior_obstacles = 2000;         // Weight for wind close to obstacles prior
+            double picard_convergence_thr = 1e-2;
+            double lambda_regularization = 1e-4;
         };
 
         // Create GMRF from an occupancy gridmap
@@ -216,7 +218,10 @@ namespace gmrfw
         double lambdaPrior_mass_conservation; // Weight for mass conservation (divergence free)
         double lambdaPrior_diffusion;         // Weight for difussion prior (wind in a cell should be similar to its neighbors in all directions, also regularization)
         double lambdaPrior_obstacles;         // Weight for wind close to obstacles prior
+        double lambda_regularization;         // Weight for regularization prior
         std::vector<int> m_cells_to_obs;      // Distance in cells to the closest obstacle
+
+        double picard_convergence_thr;
 
         // GMRF Matrices and Structures
         std::vector<Eigen::Triplet<double>> J;                    // Jacobian

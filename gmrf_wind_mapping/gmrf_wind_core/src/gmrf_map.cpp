@@ -21,6 +21,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
     this->factor_select[3] = params.lambdaPrior_obstacles > 0;         // Obstacles
     this->verbose = verbose;
     this->estimateTiming = estimateTiming;
+    this->picard_convergence_thr = params.picard_convergence_thr;
     update_lambdas(params.lambdaPrior_advection, params.lambdaPrior_mass_conservation, params.lambdaPrior_diffusion, params.lambdaPrior_obstacles);
 
     try
@@ -821,7 +822,7 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
         case FactorType::Obstacle: 
             return lambdaPrior_obstacles;
         case FactorType::Regularization:
-            return 0.0001;
+            return lambda_regularization;
         default: 
         {
             std::cerr << "Warning: Unrecognized factor type in getLambdaValue." << std::endl;
@@ -1131,7 +1132,7 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                     break;
                 }
 
-                if (rel_change < 1e-3) {
+                if (rel_change < picard_convergence_thr) {
                     std::cerr << "--> MAP Converged at iteration " << iter << std::endl;
                     converged = true;
                     break;
