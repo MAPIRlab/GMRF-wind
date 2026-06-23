@@ -1,5 +1,6 @@
 #include "gmrf_wind_core/gmrf_map.h"
 #include <cstdio>  // Necesario para fprintf
+#include <filesystem>
 #include <iomanip> // Necesario para std::setprecision
 #include <iostream>
 #include <queue>
@@ -22,6 +23,7 @@ CGMRF_map::CGMRF_map(const TOccupancyMap& oc_map,
     this->verbose = verbose;
     this->estimateTiming = estimateTiming;
     this->picard_convergence_thr = params.picard_convergence_thr;
+    this->lambda_regularization = params.lambda_regularization;
     update_lambdas(params.lambdaPrior_advection, params.lambdaPrior_mass_conservation, params.lambdaPrior_diffusion, params.lambdaPrior_obstacles);
 
     try
@@ -1094,7 +1096,7 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 std::cerr << "=============================================================" << std::endl;
 
                 std::string ComputationInfo[4] = {"Success", "NumericalIssue", "NoConvergence", "InvalidInput"};
-                std::cerr << "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << std::endl;
+                std::cerr << "\033[1;31m" "Eigen Computation Info Code: " << ComputationInfo[solver.info()] << "\033[0m" << std::endl;
                 return;
             }
 
