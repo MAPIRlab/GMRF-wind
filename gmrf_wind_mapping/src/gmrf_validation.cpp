@@ -519,6 +519,15 @@ bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
         n_horiz_top = 6;
         n_horiz_bottom = 6;
     }
+    else
+    {
+        // for experiment with num_samples = 6:10:96
+        // num_samples = 6 (2 v + 4 h), 16 (6 v + 10 h), 26 (10 v + 16 h), ... 96 (38 v + 58 h)
+        n_vert_H = 1 + (num_samples - 6)/10 *2;
+        n_vert_2H = 1 + (num_samples - 6)/10 *2;
+        n_horiz_top = 2 + (num_samples - 6)/10 *3;
+        n_horiz_bottom = 2 + (num_samples - 6)/10 *3;
+    }
 
     // Lambda helper function to sample uniformly along the profiles 
     auto sampleUniformly = [](const std::vector<WindObservation>& src, std::vector<WindObservation>& dest, int count) 
@@ -570,6 +579,26 @@ bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
         }
     };
 
+    auto sampleRandom = [&](const std::vector<WindObservation>& src, std::vector<WindObservation>& dest, int count) 
+    {
+        if (src.empty() || count <= 0) return;
+        
+        if (count >= src.size()) {
+            dest.insert(dest.end(), src.begin(), src.end());
+            return;
+        }
+
+        std::uniform_int_distribution<int> dist(0, src.size() - 1);
+        std::unordered_set<int> selected_indices;
+
+        while (selected_indices.size() < static_cast<size_t>(count)) {
+            int random_idx = dist(gen);
+            if (selected_indices.insert(random_idx).second) { // insert returns false if the element was already present
+                dest.push_back(src[random_idx]);
+            }
+        }
+    };
+
 
     bool fixed_sampling = false;    
     if (fixed_sampling) {
@@ -582,20 +611,26 @@ bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
     else
     {
         // 2b. Estratificado aleatorio (uniforme a lo largo del perfil pero con aleatoriedad dentro de cada bloque)
-        sampleRandomStratified(vert_H, selected_observations, n_vert_H);
-        sampleRandomStratified(vert_2H, selected_observations, n_vert_2H);
-        sampleRandomStratified(horiz_top, selected_observations, n_horiz_top);
-        sampleRandomStratified(horiz_bottom, selected_observations, n_horiz_bottom);
+        //sampleRandomStratified(vert_H, selected_observations, n_vert_H);
+        //sampleRandomStratified(vert_2H, selected_observations, n_vert_2H);
+        //sampleRandomStratified(horiz_top, selected_observations, n_horiz_top);
+        //sampleRandomStratified(horiz_bottom, selected_observations, n_horiz_bottom);
+        // 2c. Aleatorio (uniforme a lo largo del perfil pero con aleatoriedad dentro de cada bloque)
+        sampleRandom(vert_H, selected_observations, n_vert_H);
+        sampleRandom(vert_2H, selected_observations, n_vert_2H);
+        sampleRandom(horiz_top, selected_observations, n_horiz_top);
+        sampleRandom(horiz_bottom, selected_observations, n_horiz_bottom);
     }
     
     // Include always the observation close to the inlet (inlet=true)
+    /*
     auto inlet_it = std::find_if(all_observations.begin(), all_observations.end(), [](const WindObservation& obs) {
         return obs.inlet;
     });
     if (inlet_it != all_observations.end()) {
         selected_observations.push_back(*inlet_it);
     }   
-    
+    */
 
     // 3. Add selected observations to the GMRF map
     for (const auto& obs : selected_observations)
@@ -1848,21 +1883,21 @@ int main(int argc, char** argv)
         });
 
         
-        auto data_sampeles = {6, 16, 26, 36, 46, 56, 66, 76, 86, 96};
-        //auto data_sampeles = {16, 32, 98};
+        //auto data_sampeles = {6, 16, 26, 36, 46, 56, 66, 76, 86, 96};
+        auto data_sampeles = {16, 32, 98};
         for (auto num_samples : data_sampeles)
         {
             //Repeat N times 
-            for (int repeat = 0; repeat < 200; ++repeat)
+            for (int repeat = 0; repeat < 100; ++repeat)
             {
                 // Clear GMRF estimation to avoid bias from previous runs
-                my_gmrf_map->clearEstimation();                
+                my_gmrf_map->clearEstimation();
 
                 // Load IAE Annex 20 Real data
-                //my_gmrf_map->LoadIAEAnnex20Data(num_samples);
+                my_gmrf_map->LoadIAEAnnex20Data(num_samples);
 
                 // Load IEA Annex 20 CFD data
-                my_gmrf_map->SimulateIAEAnnex20Data(num_samples);
+                //my_gmrf_map->SimulateIAEAnnex20Data(num_samples);
 
                 // Estimate MAP
                 my_gmrf_map->update();
@@ -1871,7 +1906,7 @@ int main(int argc, char** argv)
                 if (true) 
                 {
                     //std::string filename_csv = "IEA_Annex_20_results_MAE/gmrf_estimation_IAE_annex20_" + std::to_string(num_samples) + "obs_iter" + std::to_string(repeat) + ".csv";
-                    std::string filename_csv = "IEA_Annex_20_results_RMSE/gmrf_estimation_IAE_annex20_" + std::to_string(num_samples) + "obs_iter" + std::to_string(repeat) + ".csv";
+                    std::string filename_csv = "IEA_Annex_20_results_MAE_NoInlet/gmrf_estimation_IAE_annex20_" + std::to_string(num_samples) + "obs_iter" + std::to_string(repeat) + ".csv";
                     my_gmrf_map->saveGMRFEstimationToCSV(filename_csv);
                 }
             }

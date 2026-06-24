@@ -34,8 +34,8 @@ def launch_setup(context, *args, **kwargs):
             {"verbose": False},                                # Verbose mode for debugging
             {"visualize_gmrf": False},                         # Visualize the GMRF wind field in RViz
             # Lambda weights for the different priors & Obs in the GMRF model
-            {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
-            {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
+            {"observation_var_wind_speed": 0.016},           # Variance of the wind speed measurement (m/s)^2
+            {"observation_var_wind_direction": 0.016},       # Variance of the wind direction measurement (rad)^2
             {"GMRF_lambdaPrior_advection": 1.0},             # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
             {"GMRF_lambdaPrior_mass_conservation": 100.0},     # Mass conservation law -> divergence of the wind field is zero
             {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
