@@ -32,9 +32,9 @@ sample_spaces = [98, 32, 16]
 gmrf_boxplot_data = {16: [], 32: [], 98: []}
 
 for num_samples in [16, 32, 98]:
-    for repeat in range(20):
+    for repeat in range(100):
         # Construir el nombre del archivo exactamente como se guardó en C++
-        filename = f"IEA_Annex_20_results_MAE/gmrf_estimation_IAE_annex20_{num_samples}obs_iter{repeat}.csv"
+        filename = f"IEA_Annex_20_results_MAE_NoInlet/gmrf_estimation_IAE_annex20_{num_samples}obs_iter{repeat}.csv"
         
         try:
             # Load CSV file

@@ -25,8 +25,8 @@ wei_fig9_interp = {
 wei_fig9_ann = {
     6:  [0.195, 0.225, 0.252, 0.115, 0.298],
     16: [0.160, 0.201, 0.233, 0.110, 0.290],
-    26: [0.182, 0.211, 0.231, 0.138, 0.270], # <-- MODIFICADO: Mediana sube a 0.211 (Joroba detectada)
-    36: [0.128, 0.156, 0.181, 0.090, 0.220], # <-- Caída drástica de la joroba
+    26: [0.182, 0.211, 0.231, 0.138, 0.270],
+    36: [0.128, 0.156, 0.181, 0.090, 0.220],
     46: [0.120, 0.144, 0.167, 0.088, 0.205],
     56: [0.115, 0.131, 0.146, 0.085, 0.181],
     66: [0.111, 0.126, 0.135, 0.085, 0.165],
@@ -56,7 +56,7 @@ gmrf_rmse_data = {n: [] for n in sample_spaces}
 for num_samples in sample_spaces:
     for repeat in range(200):
         # Construir el nombre del archivo exactamente como se guardó en C++
-        filename = f"IEA_Annex_20_results_RMSE/gmrf_estimation_IAE_annex20_{num_samples}obs_iter{repeat}.csv"
+        filename = f"IEA_Annex_20_results_RMSE_CFD_highNoise/gmrf_estimation_IAE_annex20_{num_samples}obs_iter{repeat}.csv"
         
         try:
             # Load CSV file
