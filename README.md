@@ -10,14 +10,13 @@ By combining these four energy terms, the GMRF-W framework is able to estimate a
 
 If it is relevant to your research, you can cite the paper with the following BibTex: 
 ```
-@INPROCEEDINGS{jmonroy_isoen_2017,
-     author = {Monroy, Javier and Jaimez, Mariano and Gonzalez-Jimenez, Javier},
-      title = {Online Estimation of 2D Wind Maps for Olfactory Robots},
-  booktitle = {International Symposium on Olfaction and Electronic Nose (ISOEN)},
-       year = {2017},
-   location = {Montreal (Canada)},
-        doi = {10.1109/ISOEN.2017.7968883},
-      pages = {1--3}
+@ARTICLE{monroy_bae_2026,
+    author = {Monroy, Javier and Ojeda, Pepe and Gonzalez-Jimenez, Javier},
+     title = {A Physics-Informed Gaussian Markov Random Field Framework for Indoor Airflow Field Estimation},
+   journal = {Building and Environment},
+      year = {2026},
+       url = {https://doi.org/10.1016/j.buildenv.2026.114957},
+       doi = {10.1016/j.buildenv.2026.114957}
 }
 ```
 Although GMRF-W is a self-contained pkg, the implementation considers anemometer sensor readings which depends on an external pkg defining some "olfaction" related msgs. This pkg is available in a different repository named olfaction_msgs (https://github.com/MAPIRlab/olfaction_msgs).
