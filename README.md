@@ -1,23 +1,87 @@
 # GMRF-wind
 
-A Gaussian Markov Random Field (GMRF) is a specific type of Markov Random Field (MRF) where the set of random variables follows a multivariate Gaussian (Normal) distribution. It is a statistical model used to describe the dependencies among a collection of random variables, often representing spatial or temporal data. This repository applies this framwork to the estimation of 2D wind maps (W) from a set of wind vector observations (Z) and prior knowledge encapsulating physical constraints, providing a ROS2 wrapped implementation of the algorithm presented in this paper: https://ieeexplore.ieee.org/document/7968883
+A lightweight, training-free, physics-informed **2D indoor airflow field estimation** using Gaussian Markov Random Fields (GMRF).
 
-The core of the Gaussian Markov Random Field (GMRF) framework is the definition of energy terms (or factors) that encode the relationships between adjacent cells and observations, ultimately leading to the Maximum a Posteriori (MAP) estimation through the minimization of the total energy function, E(W,Z). For GMRF-W (used for Online Estimation of 2D Wind Maps), four primary ”energies”
-are considered. All four terms have direct or conceptual physical relevance. The overall energy function E(W,Z) is the sum of these four factors:
-     E(W,Z) = Ez(W,Z) + Em(W) + Eo(W) + Er(W)
+[![Paper](https://img.shields.io/badge/Paper-Building%20and%20Environment-blue)](https://doi.org/10.1016/j.buildenv.2026.114957)
+[![ROS 2](https://img.shields.io/badge/ROS%202-Humble%20%7C%20Jazzy-brightgreen)](https://docs.ros.org/)
 
-By combining these four energy terms, the GMRF-W framework is able to estimate a 2D wind map that is consistent with observations (Ez), respects the presence of obstacles (Eo), and adheres to the law of mass conservation for incompressible flow (Em). Moreover a reguralization constrain is applied (Er). This allows the GMRF-W approach to function as a real-time 2D approximation of more complex Computational Fluid Dynamics (CFD) techniques, ideal for robotics that adquire new observations as they inspect the environment.
+---
+
+## Overview
+
+`GMRF-wind` provides a real-time, training-free spatial estimation framework to reconstruct continuous 2D wind velocity maps ($\mathbf{W}$) from a set of sparse, noisy wind vector observations ($\mathbf{Z}$) and occupancy grid geometries. 
+
+Instead of relying on heavy Computational Fluid Dynamics (CFD) solvers or data-intensive machine learning models, this package formulates wind field estimation as a **Maximum A Posteriori (MAP)** inference problem on a Gaussian Markov Random Field graph. By minimizing a total energy function $E(\mathbf{W}, \mathbf{Z})$, the algorithm efficiently solves a linear sparse system to deliver macro-scale wind maps in milliseconds.
+
+This repository provides the official ROS 2 wrapper and C++ core implementation of the methodology presented in:
+
+> **A Physics-Informed Gaussian Markov Random Field Framework for Indoor Airflow Field Estimation**  
+> *Javier Monroy, Pepe Ojeda, and Javier Gonzalez-Jimenez*  
+> *Building and Environment*, Vol. 288, 2026.  
+> 🔗 [Read Full Paper (Open Access)](https://doi.org/10.1016/j.buildenv.2026.114957)
+
+---
+
+## Key Features
+
+- ⚡ **Real-Time & Computational Efficiency:** Solves spatial estimates in milliseconds on CPU, suitable for low-power onboard robotic processors.
+- 🚫 **Training-Free & Zero Setup:** Requires no offline datasets, neural network training, or parameter tuning per environment.
+- 🛡️ **Physics-Grounded Constraints:** Embeds fundamental fluid transport mechanics directly into the graph precision matrix:
+  - **Incompressibility / Continuity Constraint:** $\nabla \cdot \mathbf{w} = 0$
+  - **Advection-Diffusion Momentum Proxy:** Smooths flow direction along streamlines while preserving spatial gradients.
+  - **No-Penetration Boundary Conditions:** Prevents unphysical airflow through walls and solid obstacles ($\mathbf{w} \cdot \mathbf{n}_{\text{obs}} = 0$).
+- 🤖 **Robotics Ready:** Native ROS 2 integration accepting live OccupancyGrid maps and point wind observations (e.g., from anemometers mounted on mobile robots).
+
+---
+
+## How It Works
+
+The framework embeds simplified physical constraints derived from the Navier–Stokes equations—including mass conservation, advection, and viscous diffusion—into the estimation process, ensuring physically consistent flow reconstruction at a fraction of the computational cost of CFD. It defines specialized energy factors encoding geometric spatial priors, physical conservation laws, and sensor observation models:
+
+$$E(\mathbf{W}, \mathbf{Z}) = E_{\text{z}}(\mathbf{W}, \mathbf{Z}) + E_{\text{o}}(\mathbf{W}) + E_{\text{physics}}(\mathbf{W})$$
+
+1. **Observation Factor ($E_{\text{z}}$):** Pulls the local velocity vector towards incoming anemometer measurements.
+2. **Spatial Prior ($E_{\text{o}}$):** enforces a boundary condition without penetration at obstacles.
+3. **Physics Factors ($E_{\text{physics}}$):** Constrains neighbor-to-neighbor transitions according to indoor mass continuity, advection and diffusion.
+
+The resulting sparse Gaussian precision matrix ($\mathbf{Q}$) allows solving the linear system $\mathbf{Q}\mathbf{W} = \mathbf{b}$ continuously, as new measurements arrive.
+
+
+
+---
+
+## Intended Applications
+
+`GMRF-wind` is designed for operational robotics and environmental monitoring applications where fast, macro-scale flow awareness is required:
+
+- **Robot-Assisted Gas Source Localization (GSL):** Guiding mobile inspection robots toward hazardous gas leaks by tracking active wind corridors.
+- **Indoor Air Quality (IAQ) & HVAC Optimization:** Rapid mapping of ventilation patterns, stagnation zones, and pollutant dispersion routes.
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- ROS 2 (Humble / Iron / Jazzy)
+- Eigen3
+- OpenCV / PCL (for map handling)
+
+Although GMRF-W is a self-contained pkg, the implementation considers anemometer sensor readings which depends on an external pkg defining some "olfaction" related msgs. This pkg is available in a different repository named olfaction_msgs (https://github.com/MAPIRlab/olfaction_msgs).
+
+### Citation
 
 If it is relevant to your research, you can cite the paper with the following BibTex: 
 ```
-@INPROCEEDINGS{jmonroy_isoen_2017,
-     author = {Monroy, Javier and Jaimez, Mariano and Gonzalez-Jimenez, Javier},
-      title = {Online Estimation of 2D Wind Maps for Olfactory Robots},
-  booktitle = {International Symposium on Olfaction and Electronic Nose (ISOEN)},
-       year = {2017},
-   location = {Montreal (Canada)},
-        doi = {10.1109/ISOEN.2017.7968883},
-      pages = {1--3}
+@ARTICLE{monroy_bae_2026,
+    author = {Monroy, Javier and Ojeda, Pepe and Gonzalez-Jimenez, Javier},
+     title = {A Physics-Informed Gaussian Markov Random Field Framework for Indoor Airflow Field Estimation},
+   journal = {Building and Environment},
+      year = {2026},
+       url = {https://doi.org/10.1016/j.buildenv.2026.114957},
+       doi = {10.1016/j.buildenv.2026.114957}
 }
+
 ```
-Although GMRF-W is a self-contained pkg, the implementation considers anemometer sensor readings which depends on an external pkg defining some "olfaction" related msgs. This pkg is available in a different repository named olfaction_msgs (https://github.com/MAPIRlab/olfaction_msgs).
+
+
