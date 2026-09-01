@@ -20,6 +20,33 @@ This repository provides the official ROS 2 wrapper and C++ core implementation 
 > *Building and Environment*, Vol. 288, 2026.  
 > 🔗 [Read Full Paper (Open Access)](https://doi.org/10.1016/j.buildenv.2026.114957)
 
+## The Code
+
+The repository is organized as a ROS 2 workspace-style package collection: one small message package for custom interfaces (**gmrf_msgs**) and one main mapping package that contains the C++ solver, launch/config files, scripts, and data assets for estimating 2D indoor airflow fields. The code is essentially divided into the core library (in the subpackage **gmrf_wind_core**) and a ROS-wrapper node (**gmrf_wind_mapping**).
+
+Whitin it, there are two ROS executables, the main “nodes” you should care about:
+
+1) **gmrf_wind_mapping_node** implemented in gmrf_node.cpp:  this is the main runtime node for online wind mapping.
+- accepts an environment occupancy map (from MapServer)
+- receives sparse wind observations from anemometers (via topic subscription)
+- converts sensor measurements into map-frame coordinates using TF
+- inserts those observations into a CGMRF_map (the core class, ROS-independent)
+- solves the MAP estimation repeatedly
+- publishes the result as RViz markers (for visualization and debug)
+- exposes two services: **WindEstimation**: returns U/V velocity components, can query either the whole grid or specific points. **AddWindObservation**: lets clients add additional sensor observations directly, useful for external sources or debugging.
+
+This is the node used in the standard launch file **gmrf_wind_launch.py**.
+
+2) **gmrf_validation** implemented in gmrf_validation.cpp: this is an evaluation/benchmark node designed to operate offline for numerical testing.
+- it loads an occupancy map and CFD ground-truth dataset (from file)
+- runs the estimator after "simulating" measurements
+- compares prediction quality using metrics like MAE/RMSE or similar optimization criteria
+- it is designed for validation experiments rather than real-time deployment
+
+This is the node launched by **gmrf_validation_launch.py**.
+
+
+
 ---
 
 ## Key Features
