@@ -30,6 +30,7 @@ include_directories(
   ${CERES_INCLUDE_DIRS}
 )
 
+# The GMRF-WIND-CORE library
 add_subdirectory(gmrf_wind_core)
 
 # Install launch files and related config files.
