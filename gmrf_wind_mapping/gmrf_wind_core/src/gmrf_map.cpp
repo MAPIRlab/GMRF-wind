@@ -663,6 +663,74 @@ bool CGMRF_map::insertObservation_GMRF(double wind_speed, double wind_direction,
     }
 }
 
+bool CGMRF_map::insertObservation_xy_GMRF(double wind_x, double wind_y, double var_wind_x, double var_wind_y, double x_pos, double y_pos)
+{
+    // Overload for when the user already provides the wind components and their variances
+    // Also usefull for inserting just wind on one of the components (NaN for the other component)
+    try
+    {
+        auto add_obs = [this](const TobservationGMRF& observation)
+        {
+            if (observation.cell_idx < 0 || observation.cell_idx > N)
+            {
+                std::cerr << "[GMRF-MAP] Observation is outside of the map!" << std::endl;
+                return;
+            }
+            activeObs.push_back(observation);
+        };
+
+        // Get cell indexes
+        const int cellIdx = xy2idx(x_pos, y_pos);
+
+        // Fill new Observation
+        if (x_pos <= m_x_min || x_pos >= m_x_max || y_pos <= m_y_min || y_pos >= m_y_max || !is_cell_free(cellIdx))
+            return false;
+
+        TobservationGMRF new_obs;
+        new_obs.cell_idx = cellIdx;
+        new_obs.wind_x = wind_x;
+        new_obs.wind_y = wind_y;
+        new_obs.var_xx = var_wind_x;
+        new_obs.var_yy = var_wind_y;
+        new_obs.cov_xy = 0.0; // Assuming no covariance between x and y components for simplicity
+        new_obs.wind_module = std::numeric_limits<double>::quiet_NaN();  //set as NaN to indicate that the module and direction are not provided (only components)
+        new_obs.wind_direction = std::numeric_limits<double>::quiet_NaN();
+        new_obs.time_invariant = true; // Default behaviour, the obs will not lose weight with time.
+
+        if (verbose)
+            std::cerr << "[GMRF-MAP] New obs: Wx = " << new_obs.wind_x << " m/s Wy = " << new_obs.wind_y << " m/s" << std::endl;
+
+        // Add Observation to GMRF
+        if (std::isnan(wind_x) && std::isnan(wind_y))
+        {
+            std::cerr << "[GMRF-MAP] Invalid observation: Both wind_x and wind_y are NaN." << std::endl;
+            return false;
+        }
+        else if (std::isnan(wind_x))
+        {
+            // Only wind_y is provided, set a high variance for wind_x to reflect the uncertainty
+            new_obs.var_xx = 1e6; // Large variance for unknown component
+            nObsFactors += 1; // Only one factor for wind_y
+        }
+        else if (std::isnan(wind_y))
+        {
+            // Only wind_x is provided, set a high variance for wind_y to reflect the uncertainty
+            new_obs.var_yy = 1e6; // Large variance for unknown component
+            nObsFactors += 1; // Only one factor for wind_x
+        }
+        add_obs(new_obs);
+        return true;
+    }
+    catch (std::exception e)
+    {
+        std::cerr << "=============================================================" << std::endl;
+        std::cerr << "[GMRF-insertObservation_GMRF] EXCEPTION: " << e.what() << std::endl;
+        std::cerr << "=============================================================" << std::endl;
+        return false;
+    }
+}
+
+
 std::vector<TobservationGMRF> CGMRF_map::getObservations_GMRF()
 {
     return activeObs;
@@ -764,10 +832,8 @@ double CGMRF_map::getLambdaValue(FactorType type, size_t cell_idx, size_t neighb
 
         size_t cx, cy;
         id2cellxy(c_idx, cx, cy);
-
         int dist_fwd = 0;
         int max_lookahead = 4;
-
         for (int s = 1; s <= max_lookahead; s++) 
         {
             int nx = (int)cx + s * step_x;
@@ -913,7 +979,7 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             std::cerr << "[CGMRF-MAP] Starting MAP Estimation with " << m_picard_iterations << " Picard-like iterations..." << std::endl;
 
         if (estimateTiming)
-            meanTimer.start();
+            meanTimer.start();  // MAP timer
 
         // 1. Get current number of factors (nPriorFactors is constant, but nObsFactors is dynamic)
         nFactors = nPriorFactors + nObsFactors;
@@ -924,8 +990,12 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
         //double prev_weighted_residual_norm = std::numeric_limits<double>::max();
         bool converged = false;
         Eigen::VectorXd prev_map_state(2 * N);
+        TimeStats picardTimer; // Local timer for each iteration
         for (int iter = 0; iter < m_picard_iterations; ++iter)
         {
+            if (estimateTiming)
+                picardTimer.start();
+
             // 2. Setup the prior part of Jacobian (fixed)
             std::vector<Eigen::Triplet<double>> J_temp;
             J_temp.reserve(J.size() + nObsFactors);
@@ -954,26 +1024,37 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
             size_t count = nPriorFactors; // start after the already introduced prior factors
             for (std::vector<TobservationGMRF>::iterator ito = activeObs.begin(); ito != activeObs.end(); ++ito)
             {
-                bool x_y_independent = false;
-
-                if (x_y_independent)
+                // Check if module is set (not NaN), if not we assume that the user provided directly 
+                // the components x,y and their variances.
+                if (std::isnan(ito->wind_module) && std::isnan(ito->wind_direction))
                 {
-                    // Each observation translates to 2 factors (Wx,Wy)
+                    // Each observation translates to a maximum of 2 factors (Wx,Wy)
+                    // It depends on the user input
+                    
                     // Wx range [1,N]
-                    Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
-                    J_temp.push_back(J_entry);
-                    y_temp[count] = ito->wind_x;
-                    Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
-                    Lambda_temp.push_back(lambda_entry);
-                    count++;
+                    if (!std::isnan(ito->wind_x))
+                    {
+                        Eigen::Triplet<double> J_entry(count, ito->cell_idx, 1);
+                        J_temp.push_back(J_entry);
+                        y_temp[count] = ito->wind_x;
+                        Eigen::Triplet<double> lambda_entry(count, count, 1.0 / ito->var_xx);
+                        Lambda_temp.push_back(lambda_entry);
+                        count++;
+                        // print debug
+                        if (verbose)
+                            std::cerr << "          [GMRF] Obs Factor (only WIND-X): Cell " << ito->cell_idx << " Wx = " << ito->wind_x << " var_xx = " << ito->var_xx << std::endl;
+                    }
 
                     // Wy range [N+1,2N]
-                    Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
-                    J_temp.push_back(J_entry2);
-                    y_temp[count] = ito->wind_y;
-                    Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
-                    Lambda_temp.push_back(lambda_entry2);
-                    count++;
+                    if (!std::isnan(ito->wind_y))
+                    {
+                        Eigen::Triplet<double> J_entry2(count, ito->cell_idx + N, 1);
+                        J_temp.push_back(J_entry2);
+                        y_temp[count] = ito->wind_y;
+                        Eigen::Triplet<double> lambda_entry2(count, count, 1.0 / ito->var_yy);
+                        Lambda_temp.push_back(lambda_entry2);
+                        count++;
+                    }
                 }
                 else
                 {
@@ -1115,6 +1196,13 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
                 current_map_state(j) = m_map[j].mean;
             }
 
+            if (estimateTiming) 
+            {
+                picardTimer.stop();
+                // Save the individual iteration time to file
+                saveTimingData("MAP_Iteration", N, iter + 1, picardTimer.getLastTimeMs());
+            }
+
             if (iter > 0)
             {
                 // Calculate L2 norm of the difference between current and previous state
@@ -1144,13 +1232,17 @@ void CGMRF_map::MAP_estimation_GMRF(int m_picard_iterations)
 
         } // end of Picard iterations
 
-        if (!converged) {
+
+        if (!converged && verbose) {
             std::cerr << "--> MAP did not converge after " << m_picard_iterations << " iterations." << std::endl;
         }
 
         if (estimateTiming)
         {
             meanTimer.stop(); // Stop Timer for Mean computation
+            // Save the total MAP time for this run
+            saveTimingData("MAP_Total", N, 0, meanTimer.getLastTimeMs());
+
             auto mean_time_ms = meanTimer.getMeanTimeMs();
             std::cerr << "[GMRF] MAP Mean value estimated in " << mean_time_ms << " milliseconds" << std::endl;
         }
@@ -1193,6 +1285,8 @@ void CGMRF_map::computeUncertainty_GMRF()
 
             if (estimateTiming)
                 stdTimer.stop(); // Stop Timer for Uncertainty computation
+                // Save the total uncertainty time for this run
+                saveTimingData("Uncertainty_Total", N, -1, stdTimer.getLastTimeMs());
             return;
         }
 
@@ -1225,6 +1319,9 @@ void CGMRF_map::computeUncertainty_GMRF()
         if (estimateTiming)
         {
             stdTimer.stop(); // Stop Timer for Uncertainty computation
+            // Save the total uncertainty time for this run
+            saveTimingData("Uncertainty_Total", N, 0, stdTimer.getLastTimeMs());
+
             auto std_time_ms = stdTimer.getMeanTimeMs();
             std::cerr << "[GMRF] Uncertainty value estimated in " << std_time_ms << " milliseconds" << std::endl;
         }
@@ -1234,6 +1331,18 @@ void CGMRF_map::computeUncertainty_GMRF()
         std::cerr << "=============================================================" << std::endl;
         std::cerr << "[GMRF-computeUncertainty_GMRF] EXCEPTION: " << e.what() << std::endl;
         std::cerr << "=============================================================" << std::endl;
+    }
+}
+
+void CGMRF_map::saveTimingData(const std::string& phase, int num_cells, int iter, double time_ms)
+{
+    // Open in append mode so we don't overwrite previous runs
+    std::ofstream file("gmrfw_timing_log.csv", std::ios::app);
+    if (file.is_open()) {
+        file << phase << "," << num_cells << "," << iter << "," << time_ms << "\n";
+        file.close();
+    } else {
+        std::cerr << "Error: Could not open timing log file." << std::endl;
     }
 }
 
@@ -1409,4 +1518,10 @@ int CGMRF_map::xy2idx(float x, float y) const
 void CGMRF_map::id2xy_public(size_t id, double& x, double& y) const
 {
     id2xy(id, x, y);
+}
+
+//Public wrapper to expose xy2idx
+int CGMRF_map::xy2idx_public(float x, float y) const
+{
+    return xy2idx(x, y);
 }

@@ -3,12 +3,11 @@
 <package format="3">
   <name>gmrf_wind_mapping</name>
   <version>0.0.0</version>
-  <description>This packages estimates the average windflow present in an environment from a set of 2D anemometer measurements.
-               The implementation is based on Gaussian Markov Random Fields</description>
-  <maintainer email="jgmonroy@uma.es">Javier G Monroy</maintainer>
+  <description>A lightweight, training-free, physics-informed **2D indoor airflow field estimation** using Gaussian Markov Random Fields (GMRF)</description>
+  <maintainer email="jgmonroy@uma.es">Javier Monroy</maintainer>
 
   <license>GPLv3</license>
-  <author>Javier G. Monroy</author>  
+  <author>Javier Monroy</author>  
 
   <buildtool_depend>ament_cmake</buildtool_depend>
     

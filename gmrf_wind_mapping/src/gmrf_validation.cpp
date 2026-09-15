@@ -21,6 +21,7 @@
 #include <random>
 #include <numeric>   // Required for std::inner_product
 #include <cmath>     // Required for mathematical operations
+#include <filesystem>
 
 using namespace std::placeholders;
 using namespace gmrfw;
@@ -174,7 +175,7 @@ void Cvalgt::initialize()
     gmrf_map = std::make_unique<CGMRF_map>(occMap, 
                                         params,
                                         verbose,
-                                        false // estimateTiming
+                                        true // estimateTiming
                                         );
     gmrf_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
     RCLCPP_INFO(get_logger(), "[GMRF-validation] GMRF Initialized");
@@ -362,6 +363,352 @@ inline void Cvalgt::ReadGroundTruthWindMap(const std::string& filename)
     }
 }
 
+double safe_stod(const std::string& str)
+{
+    try {
+        return std::stod(str);
+    } catch (...) {
+        return -999.0;
+    }
+}
+
+
+bool Cvalgt::LoadIAEAnnex20Data(const int num_samples)
+{
+    // Clear previous observations in the GMRF map, if any
+    gmrf_map->clearObservations_GMRF();
+
+    // This function loads the IEA Annex 20 dataset (real measurements, only Ux), which is a common benchmark for wind mapping algorithms.
+    std::string filename = "/home/ubuntu/ros2_ws/src/GMRF-wind/gmrf_wind_mapping/IEA_Annex_20_dataset/IEA_Annex_20_real_measurements.csv";
+    std::vector<WindObservation> all_observations;
+    double H = 3.0;
+    double L = 9.0;
+    double h1 = 0.168; // 0.056 * H
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "[Error] File not found: " << filename << std::endl;
+        return false;
+    }
+
+    std::string line;
+    int row_count = 0;
+    bool inlet = true; // Flag to identify the inlet observation (first row of horizontal measurements)
+
+    // Read line by line
+    while (std::getline(file, line)) 
+    {
+        row_count++;
+        std::stringstream ss(line);
+        std::string cell;
+        std::vector<std::string> row_cells;
+
+        while (std::getline(ss, cell, ',')) {
+            row_cells.push_back(cell);
+        }
+
+        if (row_cells.empty()) continue;
+
+        // --- BLOQUE 1: Vertical Measurements (Rows 11 to 35 of the original CSV) ---
+        if (row_count >= 11 && row_count <= 35) {
+            // x = H (Columns 1, 2)
+            if (row_cells.size() >= 3) {
+                double coord = safe_stod(row_cells[1]);
+                double mean = safe_stod(row_cells[2]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = H; 
+                    obs.y_metric = (1.0 - coord) * H; // Nielsen physical inversion
+                    obs.u_val = mean;
+                    obs.inlet = false;
+                    obs.profile_type = "vertical_x=H";
+                    all_observations.push_back(obs);
+                }
+            }
+            // x = 2H (Columns 5, 6)
+            if (row_cells.size() >= 7) {
+                double coord = safe_stod(row_cells[5]);
+                double mean = safe_stod(row_cells[6]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = 2.0 * H;
+                    obs.y_metric = (1.0 - coord) * H;
+                    obs.u_val = mean;
+                    obs.inlet = false;
+                    obs.profile_type = "vertical_x=2H";
+                    all_observations.push_back(obs);
+                }
+            }
+        }
+
+        // --- BLOQUE 2: Horizontal Measurements (Rows 42 to 69 of the original CSV) ---
+        if (row_count >= 42 && row_count <= 69) {
+            // y = h/2 (Near ceiling jet) -> Columns 1, 2
+            if (row_cells.size() >= 3) 
+            {
+                double coord = safe_stod(row_cells[1]);
+                double mean = safe_stod(row_cells[2]);
+                if (coord != -999.0 && mean != -999.0) 
+                {
+                    WindObservation obs;
+                    obs.x_metric = coord * H;
+                    obs.y_metric = H - (0.5 * h1); // Near ceiling
+                    obs.u_val = mean;
+                    obs.profile_type = "horizontal_y=0.5h1";
+                    obs.inlet = inlet;
+                    all_observations.push_back(obs);
+                    inlet = false;
+                }
+            }
+            // y = H - h/2 (Near floor return) -> Columns 5, 6
+            if (row_cells.size() >= 7) {
+                double coord = safe_stod(row_cells[5]);
+                double mean = safe_stod(row_cells[6]);
+                if (coord != -999.0 && mean != -999.0) {
+                    WindObservation obs;
+                    obs.x_metric = coord * H;
+                    obs.y_metric = 0.5 * h1; // Near floor
+                    obs.u_val = mean;
+                    obs.profile_type = "horizontal_y=H-0.5h1";
+                    obs.inlet = false;
+                    all_observations.push_back(obs);
+                }
+            }
+        }
+    }
+    file.close();
+
+    // 1. Separar estrictamente en los 4 perfiles físicos del Benchmark
+    std::vector<WindObservation> vert_H;        // x = H
+    std::vector<WindObservation> vert_2H;       // x = 2H
+    std::vector<WindObservation> horiz_top;     // y = 0.5*h1 (Techo / Jet)
+    std::vector<WindObservation> horiz_bottom;  // y = H - 0.5*h1 (Suelo / Retorno)
+
+    for (const auto& obs : all_observations) {
+        if (obs.profile_type == "vertical_x=H") vert_H.push_back(obs);
+        else if (obs.profile_type == "vertical_x=2H") vert_2H.push_back(obs);
+        else if (obs.profile_type == "horizontal_y=0.5h1") horiz_top.push_back(obs);
+        else if (obs.profile_type == "horizontal_y=H-0.5h1") horiz_bottom.push_back(obs);
+    }
+
+    // 2. Select a subset of observations for testing (25+25+28+28=106 samples)
+    //-----------------------------------------------
+    std::vector<WindObservation> selected_observations;
+    int n_vert_H = 0, n_vert_2H = 0, n_horiz_top = 0, n_horiz_bottom = 0;
+
+    if (num_samples == 98) {
+        // Total original: ~106 puntos. Remove 2 points from each profile to have a total of 98 
+        n_vert_H = vert_H.size() - 2;
+        n_vert_2H = vert_2H.size() - 2;
+        n_horiz_top = horiz_top.size() - 2;
+        n_horiz_bottom = horiz_bottom.size() - 2;
+    } 
+    else if (num_samples == 32) {
+        // 8 verticales (4 y 4) + 24 horizontales (12 y 12)
+        n_vert_H = 4;
+        n_vert_2H = 4;
+        n_horiz_top = 12;
+        n_horiz_bottom = 12;
+    } 
+    else if (num_samples == 16) {
+        // 4 verticales (2 y 2) + 12 horizontales (6 y 6)
+        n_vert_H = 2;
+        n_vert_2H = 2;
+        n_horiz_top = 6;
+        n_horiz_bottom = 6;
+    }
+    else
+    {
+        // for experiment with num_samples = 6:10:96
+        // num_samples = 6 (2 v + 4 h), 16 (6 v + 10 h), 26 (10 v + 16 h), ... 96 (38 v + 58 h)
+        n_vert_H = 1 + (num_samples - 6)/10 *2;
+        n_vert_2H = 1 + (num_samples - 6)/10 *2;
+        n_horiz_top = 2 + (num_samples - 6)/10 *3;
+        n_horiz_bottom = 2 + (num_samples - 6)/10 *3;
+    }
+
+    // Lambda helper function to sample uniformly along the profiles 
+    auto sampleUniformly = [](const std::vector<WindObservation>& src, std::vector<WindObservation>& dest, int count) 
+    {
+        if (src.empty() || count <= 0) return;
+        
+        if (count >= src.size()) {
+            dest.insert(dest.end(), src.begin(), src.end());
+            return;
+        }
+
+        // Sample indices uniformly distributed along the source vector
+        double stride = static_cast<double>(src.size() - 1) / (count - 1);
+        for (int i = 0; i < count; ++i) {
+            int idx = std::round(i * stride);
+            // Ensure indices are within bounds
+            idx = std::max(0, std::min(idx, static_cast<int>(src.size() - 1)));
+            dest.push_back(src[idx]);
+        }
+    };
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    auto sampleRandomStratified = [&](const std::vector<WindObservation>& src, std::vector<WindObservation>& dest, int count) 
+    {
+        if (src.empty() || count <= 0) return;
+        
+        if (count >= src.size()) {
+            dest.insert(dest.end(), src.begin(), src.end());
+            return;
+        }
+
+        // Dividimos el total de datos del perfil en 'count' bloques del mismo tamaño
+        double block_size = static_cast<double>(src.size()) / count;
+
+        for (int i = 0; i < count; ++i) {
+            // Definimos los límites de índices para el bloque actual 'i'
+            int start_idx = std::floor(i * block_size);
+            int end_idx = std::floor((i + 1) * block_size) - 1;
+            
+            // Asegurar que no nos salimos del vector por redondeos
+            end_idx = std::max(start_idx, std::min(end_idx, static_cast<int>(src.size() - 1)));
+
+            // Elegimos un índice ALEATORIO estrictamente dentro de este bloque/zona
+            std::uniform_int_distribution<int> dist(start_idx, end_idx);
+            int random_idx = dist(gen);
+
+            dest.push_back(src[random_idx]);
+        }
+    };
+
+    auto sampleRandom = [&](const std::vector<WindObservation>& src, std::vector<WindObservation>& dest, int count) 
+    {
+        if (src.empty() || count <= 0) return;
+        
+        if (count >= src.size()) {
+            dest.insert(dest.end(), src.begin(), src.end());
+            return;
+        }
+
+        std::uniform_int_distribution<int> dist(0, src.size() - 1);
+        std::unordered_set<int> selected_indices;
+
+        while (selected_indices.size() < static_cast<size_t>(count)) {
+            int random_idx = dist(gen);
+            if (selected_indices.insert(random_idx).second) { // insert returns false if the element was already present
+                dest.push_back(src[random_idx]);
+            }
+        }
+    };
+
+
+    bool fixed_sampling = false;    
+    if (fixed_sampling) {
+        // 2a. Estratificado fijo (uniforme a lo largo del perfil, sin aleatoriedad)
+        sampleUniformly(vert_H, selected_observations, n_vert_H);
+        sampleUniformly(vert_2H, selected_observations, n_vert_2H);
+        sampleUniformly(horiz_top, selected_observations, n_horiz_top);
+        sampleUniformly(horiz_bottom, selected_observations, n_horiz_bottom);
+    }
+    else
+    {
+        // 2b. Estratificado aleatorio (uniforme a lo largo del perfil pero con aleatoriedad dentro de cada bloque)
+        //sampleRandomStratified(vert_H, selected_observations, n_vert_H);
+        //sampleRandomStratified(vert_2H, selected_observations, n_vert_2H);
+        //sampleRandomStratified(horiz_top, selected_observations, n_horiz_top);
+        //sampleRandomStratified(horiz_bottom, selected_observations, n_horiz_bottom);
+        // 2c. Aleatorio (uniforme a lo largo del perfil pero con aleatoriedad dentro de cada bloque)
+        sampleRandom(vert_H, selected_observations, n_vert_H);
+        sampleRandom(vert_2H, selected_observations, n_vert_2H);
+        sampleRandom(horiz_top, selected_observations, n_horiz_top);
+        sampleRandom(horiz_bottom, selected_observations, n_horiz_bottom);
+    }
+    
+    // Include always the observation close to the inlet (inlet=true)
+    /*
+    auto inlet_it = std::find_if(all_observations.begin(), all_observations.end(), [](const WindObservation& obs) {
+        return obs.inlet;
+    });
+    if (inlet_it != all_observations.end()) {
+        selected_observations.push_back(*inlet_it);
+    }   
+    */
+
+    // 3. Add selected observations to the GMRF map
+    for (const auto& obs : selected_observations)
+    {
+        
+        // only wind_x data is available in the IEA Annex 20 dataset, so we set wind_y as NaN
+        float u0 = 0.4554; // Reference wind speed at the inlet (x=0, y=0.5h1) from the dataset, used for normalization in the GMRF map
+        gmrf_map->insertObservation_xy_GMRF(obs.u_val*u0, std::numeric_limits<double>::quiet_NaN(), observation_var_wind_speed, observation_var_wind_direction, obs.x_metric, obs.y_metric);
+    }
+    return true;
+}
+
+
+bool Cvalgt::SimulateIAEAnnex20Data(const int num_samples)
+{
+    // 1. Setup Random Number Generator (RNG)
+    // std::random_device provides a non-deterministic seed (best practice)
+    // std::mt19937 is a fast, high-quality Mersenne Twister engine
+    std::mt19937 gen(std::chrono::system_clock::now().time_since_epoch().count());
+    
+    // 2. Define Distribution
+    // std::uniform_int_distribution ensures a uniform probability
+    // for all integers in the range [0, N] (inclusive).
+    Eigen::Vector2i dimensions = gmrf_map->map_size();
+    double N = dimensions.x()*dimensions.y() - 1;
+    std::uniform_int_distribution<> distrib(0, N);
+    
+    // Clear previous observations if requested
+    gmrf_map->clearObservations_GMRF();
+    
+    // Avoid sampling the same cell multiple times
+    std::vector<int> observed_cells;
+    gmrf_map->getObservationsIdx(observed_cells);
+    
+    // Add N random observations from the GT map
+    for (size_t i = 0; i < num_samples; ++i)
+    {
+        // 3. Generate and Return the Random Number
+        int idx = distrib(gen);
+
+        // Ensure we don't sample the same cell multiple times
+        while (std::find(observed_cells.begin(), observed_cells.end(), idx) != observed_cells.end())
+        {
+            idx = distrib(gen);
+        }
+
+        // Ensure cell is free
+        if (!gmrf_map->is_cell_free(idx))
+        {
+            --i; // If cell is not free, we don't count this iteration and try again
+            continue;
+        }        
+        
+        // Add to observed cells list
+        observed_cells.push_back(idx);
+        
+        // Read GT wind at that cell
+        double wind_speed_x = gt_map[idx].x;
+        double wind_speed_y = gt_map[idx].y;
+        double module = sqrt(pow(wind_speed_x,2) + pow(wind_speed_y,2));
+        double direction = atan2(wind_speed_y, wind_speed_x);
+
+        // Add gaussian noise to the observation
+        std::normal_distribution<> noise_speed(0.0, sqrt(observation_var_wind_speed));
+        std::normal_distribution<> noise_direction(0.0, sqrt(observation_var_wind_direction));
+
+        // Cell center coordinates
+        double x_pos_meters, y_pos_meters;
+        x_pos_meters = gmrf_map->map_dimensions_meters()[0] + (idx % dimensions.x() + 0.5) * cell_size;
+        y_pos_meters = gmrf_map->map_dimensions_meters()[2] + (idx / dimensions.x() + 0.5) * cell_size;
+
+        // Insert observation in GRMF
+        // only wind_x data is available in the IEA Annex 20 dataset, so we set wind_y as NaN
+        gmrf_map->insertObservation_xy_GMRF(wind_speed_x + noise_speed(gen), std::numeric_limits<double>::quiet_NaN(), observation_var_wind_speed, observation_var_wind_direction, x_pos_meters, y_pos_meters);
+    }
+    return true;
+}
+
 
 void Cvalgt::SimulateFixedWindObservations()
 {
@@ -370,15 +717,93 @@ void Cvalgt::SimulateFixedWindObservations()
     Eigen::Vector2i dimensions = gmrf_map->map_size();
     double N = dimensions.x()*dimensions.y() - 1;
     std::vector<size_t> observation_indices;
-
-    // Inlet
-    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Inlet.");
+    
+    // Left vertical Inlet (10x6 scenarios)
+    /*
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at 10x6 Inlet.");
     for (size_t row = 11; row <= 14; ++row)
     {
-        size_t i = row * dimensions.x() + 2; // First column (inlet)
+        size_t i = row * dimensions.x() + 1;
         observation_indices.push_back(i);
     }
+    
+    */
+    // Exp_C scenario: Set all the 6 inlets/outlets
+    /*
+    std::vector<int> activelets = {1, 2, 3, 4, 5 ,6};
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at Exp_C Inlet.");
+    
+    // in/outlet 1 (top-left)
+    if (std::find(activelets.begin(), activelets.end(), 1) != activelets.end())
+    {
+        for (size_t col = 14; col <= 17; ++col)
+        {
+            size_t i = (dimensions.y() - 2) * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+   // in/outlet 2 (right-top)
+   if (std::find(activelets.begin(), activelets.end(), 2) != activelets.end())
+    {
+        for (size_t row = (dimensions.y()-8); row <= (dimensions.y()-4); ++row)
+        {
+            size_t i = row * dimensions.x() + dimensions.x()-2;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 3 (left-bottom)
+    if (std::find(activelets.begin(), activelets.end(), 3) != activelets.end())
+    {
+        for (size_t row = 11; row <= 14; ++row)
+        {
+             size_t i = row * dimensions.x() + 1;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 4 (right-middle)
+    if (std::find(activelets.begin(), activelets.end(), 4) != activelets.end())
+    {
+        for (size_t row = 14; row <= 17; ++row)
+        {
+            size_t i = row * dimensions.x() + dimensions.x()-2;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 5 (bottom-left)
+    if (std::find(activelets.begin(), activelets.end(), 5) != activelets.end())
+    {
+        for (size_t col = 5; col <= 10; ++col)
+        {
+            size_t i = 1 * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+    // in/outlet 6 (bottom-right)
+    if (std::find(activelets.begin(), activelets.end(), 6) != activelets.end())
+    {    
+        for (size_t col = 29; col <= 35; ++col)
+        {
+            size_t i = 1 * dimensions.x() + col;
+            observation_indices.push_back(i);
+        }
+    }
+    */
 
+    // IEA Annex 20 scenario: Set the 2 inlets/outlets
+    RCLCPP_WARN(get_logger(), "[Cvalgt] Using fixed observations at IEA Annex 20 Inlet and Outlet.");
+    // inlet (top-left)
+    for (size_t row = 28; row <= 30; ++row)
+    {
+        size_t i = row * dimensions.x() + 1;
+        observation_indices.push_back(i);
+    }
+    // outlet (bottom-right)
+    for (size_t row = 2; row <= 6; ++row)
+    {
+        size_t i = row * dimensions.x() - 2;
+        observation_indices.push_back(i);
+        
+    }
 
     // Create observations in the GMRF map from the GT map
     for (size_t idx : observation_indices)
@@ -413,8 +838,7 @@ void Cvalgt::SimulateFixedWindObservations()
     }
 }
 
-
-void Cvalgt::SimulateWindObservations(size_t N_obs)
+void Cvalgt::SimulateWindObservations(size_t N_obs, bool remove_old_observations)
 {
     // 1. Setup Random Number Generator (RNG)
     // std::random_device provides a non-deterministic seed (best practice)
@@ -428,9 +852,16 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
     double N = dimensions.x()*dimensions.y() - 1;
     std::uniform_int_distribution<> distrib(0, N);
     
-    // Clear previous observations
-    gmrf_map->clearObservations_GMRF();
-    std::vector<size_t> observed_cells; // To keep track of which cells have been observed
+    // Clear previous observations if requested
+    if (remove_old_observations)
+    {
+        gmrf_map->clearObservations_GMRF();
+    }
+
+    // Avoid sampling the same cell multiple times
+    std::vector<int> observed_cells;
+    gmrf_map->getObservationsIdx(observed_cells);
+    
 
     // Add N random observations from the GT map
     for (size_t i = 0; i < N_obs; ++i)
@@ -449,7 +880,7 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
         {
             --i; // If cell is not free, we don't count this iteration and try again
             continue;
-        }
+        }        
         
         // Add to observed cells list
         observed_cells.push_back(idx);
@@ -478,6 +909,7 @@ void Cvalgt::SimulateWindObservations(size_t N_obs)
 }
 
 
+
 void Cvalgt::publishMaps()
 {
     if (!visualize_gmrf)
@@ -498,7 +930,7 @@ void Cvalgt::update()
     gmrf_map->MAP_estimation_GMRF(num_iterations_MAP);
 
     // Estimate uncertainty on final MAP estimation
-    gmrf_map->computeUncertainty_GMRF();
+    //gmrf_map->computeUncertainty_GMRF();
 }
 
 
@@ -1289,7 +1721,10 @@ int main(int argc, char** argv)
     case 2:     // Manual tunning of lambda parameters (dynamic reconfigure)
     {
         // Simulate Observations   
-        my_gmrf_map->SimulateFixedWindObservations();
+        //my_gmrf_map->SimulateFixedWindObservations();
+
+        // Load IAE Annex 20 data (num observations)
+        my_gmrf_map->LoadIAEAnnex20Data(16);
         
         // Start a background thread to handle ROS callbacks
         rclcpp::executors::MultiThreadedExecutor executor;
@@ -1337,6 +1772,147 @@ int main(int argc, char** argv)
         }
         break;
     }
+    case 3:     //Increasing number of observations
+    {
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        // Set Lambda values (from parameter server)
+        double lambda_advection = my_gmrf_map->get_parameter("GMRF_lambdaPrior_advection").as_double();
+        double lambda_mass_conservation = my_gmrf_map->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+        double lambda_diffusion = my_gmrf_map->get_parameter("GMRF_lambdaPrior_diffusion").as_double();
+        double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+        my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_obstacles);
+
+        // Experiment folder
+        std::string experiment_folder = "experiment2";
+        std::filesystem::create_directories(experiment_folder);
+
+        int num_repetitions = 100;
+        for (int repeat = 0; repeat < num_repetitions; ++repeat)
+        {
+            // Clear GMRF estimation to avoid bias from previous runs
+            my_gmrf_map->clearEstimation();
+            bool clear_observations = true;
+
+            // Create repetition folder
+            std::string repetition_folder = experiment_folder + "/repetition_" + std::to_string(repeat);
+            std::filesystem::create_directories(repetition_folder);
+            
+            int num_observations = 0;
+            int max_observations = 200;
+            for (num_observations = 0; num_observations <= max_observations; num_observations += 5)
+            {
+                RCLCPP_INFO(my_gmrf_map->get_logger(), "================== Simulating %d Observations ==================", num_observations);
+                
+                // Add new Observations
+                my_gmrf_map->SimulateWindObservations(5, clear_observations);
+                clear_observations = false; // Only clear observations for the first batch
+                
+                // Estimate MAP + Uncertainty
+                my_gmrf_map->update();            
+
+                // Save GMRF estimation to CSV file
+                std::string filename_csv = repetition_folder + "/gmrf_estimation_expC_" + std::to_string(num_observations) + "_obs.csv";
+                my_gmrf_map->saveGMRFEstimationToCSV(filename_csv);
+                
+                // Compute performance metrics
+                std::vector<double> metrics = my_gmrf_map->compute_performance_metrics("AVERAGES");
+                
+                // Display metrics in the console
+                RCLCPP_INFO(my_gmrf_map->get_logger(), "[gmrf-validation] AAE: %.2f rad, AME: %.2f rad, RMSE: %.2f m/s, ANSP: %.2f, ANLPD: %.2f", 
+                            metrics[0], metrics[1], metrics[2], metrics[3], metrics[4]);
+            }
+        }
+        
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
+        }
+        break;
+    }
+
+    case 4:     //Computational Time
+    {
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        // Set Lambda values (from parameter server)
+        double lambda_advection = my_gmrf_map->get_parameter("GMRF_lambdaPrior_advection").as_double();
+        double lambda_mass_conservation = my_gmrf_map->get_parameter("GMRF_lambdaPrior_mass_conservation").as_double();
+        double lambda_diffusion = my_gmrf_map->get_parameter("GMRF_lambdaPrior_diffusion").as_double();
+        double lambda_obstacles = my_gmrf_map->get_parameter("GMRF_lambdaPrior_obstacles").as_double();
+        my_gmrf_map->update_lambdas(lambda_advection, lambda_mass_conservation, lambda_diffusion, lambda_obstacles);
+       
+        int num_repetitions = 100;
+        for (int repeat = 0; repeat < num_repetitions; ++repeat)
+        {
+            // Clear GMRF estimation to avoid bias from previous runs
+            my_gmrf_map->clearEstimation();
+            
+            // Add new Observations
+            my_gmrf_map->SimulateWindObservations(60, true);
+                
+            // Estimate MAP + Uncertainty
+            my_gmrf_map->update();
+        }
+        
+        // Clean up the thread when exiting
+        rclcpp::shutdown();
+        if (spin_thread.joinable()) {
+            spin_thread.join();
+        }
+        break;
+    }
+    case 5: // IEA Dataset with 20 repetition for num_samples (98,32 and 16)
+    {
+        // Start a background thread to handle ROS callbacks
+        rclcpp::executors::MultiThreadedExecutor executor;
+        executor.add_node(my_gmrf_map);
+        std::thread spin_thread([&executor]() {
+            executor.spin(); // This will handle rqt_reconfigure instantly!
+        });
+
+        
+        //auto data_sampeles = {6, 16, 26, 36, 46, 56, 66, 76, 86, 96};
+        auto data_sampeles = {16, 32, 98};
+        for (auto num_samples : data_sampeles)
+        {
+            //Repeat N times 
+            for (int repeat = 0; repeat < 100; ++repeat)
+            {
+                // Clear GMRF estimation to avoid bias from previous runs
+                my_gmrf_map->clearEstimation();
+
+                // Load IAE Annex 20 Real data
+                my_gmrf_map->LoadIAEAnnex20Data(num_samples);
+
+                // Load IEA Annex 20 CFD data
+                //my_gmrf_map->SimulateIAEAnnex20Data(num_samples);
+
+                // Estimate MAP
+                my_gmrf_map->update();
+                
+                // Save GMRF estimation to CSV file (for debugging/visualization purposes)
+                if (true) 
+                {
+                    //std::string filename_csv = "IEA_Annex_20_results_MAE/gmrf_estimation_IAE_annex20_" + std::to_string(num_samples) + "obs_iter" + std::to_string(repeat) + ".csv";
+                    std::string filename_csv = "IEA_Annex_20_results_MAE_NoInlet/gmrf_estimation_IAE_annex20_" + std::to_string(num_samples) + "obs_iter" + std::to_string(repeat) + ".csv";
+                    my_gmrf_map->saveGMRFEstimationToCSV(filename_csv);
+                }
+            }
+        }
+    }
+
     default:
         break;
     }

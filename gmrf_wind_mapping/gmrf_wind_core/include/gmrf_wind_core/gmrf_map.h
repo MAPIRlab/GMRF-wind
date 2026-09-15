@@ -105,6 +105,15 @@ namespace gmrfw
             long long sum_ms = std::accumulate(timings_ms.begin(), timings_ms.end(), 0LL);
             return static_cast<double>(sum_ms) / timings_ms.size();
         }
+
+        long long getLastTimeMs() const {
+            if (timings_ms.empty()) return 0;
+            return timings_ms.back();
+        }
+
+        void clear() {
+            timings_ms.clear();
+        }
     };
 
     // Enum for the Factor Types
@@ -157,6 +166,8 @@ namespace gmrfw
 
         // Observations and Parameters
         bool insertObservation_GMRF(double wind_speed, double wind_direction, double var_wind_speed, double var_wind_direction, double x_pos, double y_pos);
+        bool insertObservation_xy_GMRF(double wind_x, double wind_y, double var_wind_x, double var_wind_y, double x_pos, double y_pos);
+        
         void clearObservations_GMRF();
         void getObservationsIdx(std::vector<int>& obs_idx);
         void update_lambdas(double m_lambdaPrior_adv, double m_lambdaPrior_mass, double m_lambdaPrior_diff, double m_lambdaPrior_obstacles);
@@ -177,6 +188,7 @@ namespace gmrfw
         // This forwards to the internal id2xy() utility and is provided for visualization
         // helpers that need world coordinates for each GMRF cell.
         void id2xy_public(size_t id, double& x, double& y) const;
+        int xy2idx_public(float x, float y) const;
         bool is_cell_free(size_t id_gmrf) const;
         bool is_cell_boundary(size_t id_gmrf) const;
 
@@ -248,6 +260,7 @@ namespace gmrfw
         void id2xy(size_t id, double& x, double& y) const;
 
         // Visualization
+        void saveTimingData(const std::string& phase, int num_cells, int iter, double time_ms);
         void save_grmf_factor_graph(std::vector<Eigen::Triplet<double>>& Jout, std::vector<Eigen::Triplet<double>>& Aout, Eigen::VectorXd& yout);
         void save_grmf_factor_graph(Eigen::SparseMatrix<double>& H, Eigen::VectorXd& G);
     };

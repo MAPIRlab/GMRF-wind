@@ -69,6 +69,7 @@ protected:
     double GMRF_lambdaPrior_diffusion;         // Weight for diffusion prior (neighboring cells should have similar wind values in all directions)
     double GMRF_lambdaPrior_vorticity;         // Weight for vorticity prior
     double GMRF_lambdaPrior_obstacles;         // Weight for wind close to obstacles prior -->cells close to obstacles has only tangencial wind
+    int num_iterations_MAP;                    // Maximum number of iterations for the MAP estimation optimization    
     double observation_var_wind_speed;         // Variance of the wind speed measurement (m/s)^2
     double observation_var_wind_direction;     // Variance of the wind direction measurement (rad)^2
     

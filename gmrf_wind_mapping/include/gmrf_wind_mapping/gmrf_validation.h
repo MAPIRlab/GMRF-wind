@@ -32,6 +32,13 @@ struct WindVectorXY
     double y;
 };
 
+struct WindObservation {
+    double x_metric;
+    double y_metric;
+    double u_val;
+    bool inlet;
+    std::string profile_type;
+};
 
 
 // Cvalgt class (ROS2 Node)
@@ -44,8 +51,10 @@ public:
     void update();
     void publishMaps();
     std::vector<double> compute_performance_metrics(const std::string& metric) const;
-    void SimulateWindObservations(size_t N_obs);
-    void SimulateFixedWindObservations();
+    void SimulateWindObservations(size_t N_obs, bool remove_old_observations);
+    void SimulateFixedWindObservations();    
+    bool LoadIAEAnnex20Data(const int num_samples);
+    bool SimulateIAEAnnex20Data(const int num_samples);
     void clearEstimation();
     void update_lambdas(double lambda_adv, double lambda_mass, double lambda_diff, double lambda_obst);
     void read_lambdas(double &lambda_adv, double &lambda_mass, double &lambda_diff, double &lambda_obst);

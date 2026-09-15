@@ -24,21 +24,23 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             {"frame_id": "map"},                              # Frame where to plot the map, usually (map)
             {"sensor_topic": "/anemometer"},                  # Topic where the anemometer measurements are published
-            #{"map_yaml_file": os.path.join(pkg_dir, "launch", "demo_map.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
-            {"map_yaml_file": os.path.join(test_env_dir, "scenarios", "10x6_empty_room", "occupancy.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
+            {"map_yaml_file": os.path.join(pkg_dir, "launch", "demo_map.yaml")},                                 # Path to a pre-recorded Occupancy GridMap file (grayscale Image). If empty, will listen to map_topic
             {"map_topic": "map"},                             # Topic where the Occupancy GridMap is published
+            
             {"exec_freq": 10.0},                              # Frequency (Hz) to execute the GMRF update step
-            {"cell_size": 0.3},                              # Size of each cell in the GMRF grid (meters)
+            {"cell_size": 0.3},                               # Size of each cell in the GMRF grid (meters)
             {"verbose": False},                               # Verbose mode for debugging
             {"visualize_gmrf": True},                         # Visualize the GMRF wind field in RViz
+            
             # Lambda weights for the different priors & Obs in the GMRF model
+            {"GMRF_lambdaPrior_advection": 1.0},              # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
+            {"GMRF_lambdaPrior_mass_conservation": 100.0},    # Mass conservation law -> divergence of the wind field is zero
+            {"GMRF_lambdaPrior_diffusion": 1.0},              # Diffusion constraint -> neighboring cells should have similar wind values in all directions            
+            {"GMRF_lambdaPrior_obstacles": 100.0},            # Obstacles --> cells close to obstacles has only tangencial wind
+            {"num_iterations_MAP": 10},                       # Maximum number of iterations for the MAP estimation optimization
+                        
             {"observation_var_wind_speed": 0.00025},           # Variance of the wind speed measurement (m/s)^2
-            {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2
-            {"GMRF_lambdaPrior_advection": 10.0},              # Advection constraint -> neighboring cells should have similar wind values in the direction of the wind
-            {"GMRF_lambdaPrior_mass_conservation": 10.0},      # Mass conservation law -> divergence of the wind field is zero
-            {"GMRF_lambdaPrior_diffusion": 1.0},               # Diffusion constraint -> neighboring cells should have similar wind values in all directions
-            {"GMRF_lambdaPrior_vorticity": 1.0},               # Vorticity constraint -> curl of the wind field is zero
-            {"GMRF_lambdaPrior_obstacles": 1.0},               # Obstacles --> cells close to obstacles has only tangencial wind
+            {"observation_var_wind_direction": 0.00025},       # Variance of the wind direction measurement (rad)^2                        
         ]
     )
 

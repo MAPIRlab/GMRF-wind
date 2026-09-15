@@ -10,7 +10,7 @@
 //----------------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------------
 //	Revision log:
-//	version: 2.0	20/11/2025
+//	version: 2.0	20/08/2026
 //========================================================================================
 
 #include "gmrf_wind_mapping/gmrf_node.h"
@@ -40,6 +40,7 @@ Cgmrf::Cgmrf()
     sensor_topic = declare_parameter<std::string>("sensor_topic", "/anemometer");
     mapFilePath = declare_parameter<std::string>("map_yaml_file", "");
     map_topic = declare_parameter<std::string>("map_topic", "map");
+    
     exec_freq = declare_parameter<double>("exec_freq", 2.0);
     cell_size = declare_parameter<double>("cell_size", 0.5);
     verbose = declare_parameter<bool>("verbose", false);
@@ -50,6 +51,7 @@ Cgmrf::Cgmrf()
     GMRF_lambdaPrior_mass_conservation = declare_parameter<double>("GMRF_lambdaPrior_mass_conservation", 100.0);
     GMRF_lambdaPrior_diffusion = declare_parameter<double>("GMRF_lambdaPrior_diffusion", 100.0);
     GMRF_lambdaPrior_obstacles = declare_parameter<double>("GMRF_lambdaPrior_obstacles", 10.0);
+    num_iterations_MAP = declare_parameter<int>("num_iterations_MAP", 100);
 
     // Observation variances (Gaussian likelihood)
     observation_var_wind_speed = declare_parameter<double>("observation_var_wind_speed", 0.0001);           // Variance of the wind speed measurement (m/s)^2
@@ -312,7 +314,7 @@ void Cgmrf::update()
     my_map->update_lambdas(GMRF_lambdaPrior_advection, GMRF_lambdaPrior_mass_conservation, GMRF_lambdaPrior_diffusion, GMRF_lambdaPrior_obstacles);
 
     // Update GMRF estimation
-     my_map->MAP_estimation_GMRF();
+     my_map->MAP_estimation_GMRF(num_iterations_MAP);
 }
 
 
